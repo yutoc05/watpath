@@ -1,0 +1,14 @@
+[project]
+name = "watpath-tools"
+version = "0.1.0"
+description = "Map data tooling for WatPath (OSM import, map compiler)"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tools"]
+pythonpath = ["tools/compiler", "tools/osm_import"]
+addopts = "--import-mode=importlib"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"

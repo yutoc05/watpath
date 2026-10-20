@@ -1,0 +1,5 @@
+// Shared build settings for the app target.
+//
+// Signing: Config/Local.xcconfig (gitignored) sets DEVELOPMENT_TEAM to your
+// Personal Team ID. Copy Config/Local.xcconfig.example to create it.
+#include? "Local.xcconfig"
