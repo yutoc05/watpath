@@ -1,7 +1,7 @@
 import CampusGeo
 import MapKit
 
-extension GeoCoordinate {
+nonisolated extension GeoCoordinate {
     init(_ coordinate: CLLocationCoordinate2D) {
         self.init(latitude: coordinate.latitude, longitude: coordinate.longitude)
     }
@@ -11,7 +11,7 @@ extension GeoCoordinate {
     }
 }
 
-extension MapCameraState {
+nonisolated extension MapCameraState {
     init(_ camera: MKMapCamera) {
         self.init(
             center: GeoCoordinate(camera.centerCoordinate),

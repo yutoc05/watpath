@@ -50,6 +50,20 @@ struct MapCameraTests {
         #expect(projector.project(SIMD3(50, 0, 0))!.x > viewport.x / 2)
     }
 
+    @Test func unprojectInvertsProject() {
+        let projector = PinholeProjector(state: state(heading: 125, pitch: 55), plane: plane, model: model, viewportSize: viewport, anchor: SIMD2(0, 6.5))
+        for point in [SIMD3<Double>(30, -12, 0), SIMD3(-80, 140, 0), SIMD3(5, 5, 12)] {
+            let screen = projector.project(point)!
+            let back = projector.unproject(screen, height: point.z)!
+            expectClose(back, point, tolerance: 1e-6)
+        }
+    }
+
+    @Test func skyDoesNotUnproject() {
+        let projector = PinholeProjector(state: state(pitch: 75), plane: plane, model: model, viewportSize: viewport, anchor: .zero)
+        #expect(projector.unproject(SIMD2(195, 0)) == nil)
+    }
+
     @Test func pointsBehindTheCameraDoNotProject() {
         let projector = PinholeProjector(state: state(pitch: 60), plane: plane, model: model, viewportSize: viewport, anchor: .zero)
         #expect(projector.project(SIMD3(0, -2000, 0)) == nil)

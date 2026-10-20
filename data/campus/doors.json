@@ -1,0 +1,5 @@
+{
+  "comment": "Hand edits to doors. 'doors' patches OSM entrances by id (fields: name, kind, level, accessible, verified, hidden, note). 'added' lists doors OSM is missing (also needs id, building, coordinate [lon, lat]). Photos go in data/photos/<door id>/.",
+  "doors": {},
+  "added": []
+}

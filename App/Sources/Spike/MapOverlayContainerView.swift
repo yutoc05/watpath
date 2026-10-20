@@ -52,10 +52,7 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
     private var statsWindowStart = CACurrentMediaTime()
     private(set) var stats = SpikeStats()
     private let alignmentOutline: [GeoCoordinate]
-    private let compassButton: MKCompassButton
-    private let trackingButton: MKUserTrackingButton
-    private let pitchButton = UIButton(type: .system)
-    private let controlsBackground = UIVisualEffectView(effect: UIBlurEffect(style: .systemThickMaterial))
+    private lazy var controls = MapControlsView(mapView: mapView)
 
     init(campus: CampusBundle, cameraModel: MapKitCameraModel) {
         self.campus = campus
@@ -65,19 +62,12 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
         if outline.count > 1, outline.first == outline.last { outline.removeLast() }
         alignmentOutline = outline
         spikeCenter = outline.isEmpty ? campus.origin : plane.coordinate(fromPlanar: outline.map(plane.planar).reduce(.zero, +) / Double(outline.count))
-        compassButton = MKCompassButton(mapView: mapView)
-        trackingButton = MKUserTrackingButton(mapView: mapView)
         super.init(frame: .zero)
         clipsToBounds = true
         backgroundColor = .black
 
         mapView.delegate = self
         setElevation(.realistic)
-        // MapKit's built-in controls live inside the map view, so the Path overlay
-        // would cover them. Standalone controls are added above the overlay instead.
-        mapView.showsCompass = false
-        mapView.showsUserTrackingButton = false
-        mapView.pitchButtonVisibility = .hidden
         mapView.showsUserLocation = true
         mapView.camera = MKMapCamera(lookingAtCenter: spikeCenter.clCoordinate, fromDistance: 900, pitch: 45, heading: 0)
         addSubview(mapView)
@@ -196,7 +186,7 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
     func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
         // Also sync here: during gestures this fires as soon as MapKit moves.
         syncRenderCamera()
-        updatePitchButton()
+        controls.updatePitchButton()
     }
 
     private func syncRenderCamera() {
@@ -277,45 +267,11 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
     // MARK: Controls
 
     private func setUpControls() {
-        compassButton.compassVisibility = .adaptive
-        pitchButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
-        pitchButton.addTarget(self, action: #selector(togglePitch), for: .touchUpInside)
-        updatePitchButton()
-
-        let stack = UIStackView(arrangedSubviews: [trackingButton, pitchButton])
-        stack.axis = .vertical
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        controlsBackground.layer.cornerRadius = 10
-        controlsBackground.clipsToBounds = true
-        controlsBackground.contentView.addSubview(stack)
-        controlsBackground.translatesAutoresizingMaskIntoConstraints = false
-        compassButton.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(controlsBackground)
-        addSubview(compassButton)
-
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(controls)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: controlsBackground.contentView.topAnchor),
-            stack.bottomAnchor.constraint(equalTo: controlsBackground.contentView.bottomAnchor),
-            stack.leadingAnchor.constraint(equalTo: controlsBackground.contentView.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: controlsBackground.contentView.trailingAnchor),
-            trackingButton.widthAnchor.constraint(equalToConstant: 44),
-            trackingButton.heightAnchor.constraint(equalToConstant: 44),
-            pitchButton.heightAnchor.constraint(equalToConstant: 44),
-            controlsBackground.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 56),
-            controlsBackground.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -10),
-            compassButton.topAnchor.constraint(equalTo: controlsBackground.bottomAnchor, constant: 10),
-            compassButton.centerXAnchor.constraint(equalTo: controlsBackground.centerXAnchor),
+            controls.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor, constant: 56),
+            controls.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -10),
         ])
-    }
-
-    @objc private func togglePitch() {
-        guard let camera = mapView.camera.copy() as? MKMapCamera else { return }
-        camera.pitch = mapView.camera.pitch < 1 ? 60 : 0
-        mapView.setCamera(camera, animated: true)
-    }
-
-    private func updatePitchButton() {
-        // Like Apple Maps: the button names the mode you'd switch to.
-        pitchButton.setTitle(mapView.camera.pitch < 1 ? "3D" : "2D", for: .normal)
     }
 }

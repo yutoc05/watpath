@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Import building outlines for the in-scope inventory from OpenStreetMap.
+"""Import building outlines and entrances for the in-scope inventory from OpenStreetMap.
 
-Writes data/osm/buildings.geojson, a generated file: never hand-edit it, re-run
-this script instead. Output is sorted and one feature per line so diffs stay
-readable. Map data © OpenStreetMap contributors, ODbL.
+Writes data/osm/buildings.geojson and data/osm/entrances.geojson. Both are
+generated: never hand-edit them, re-run this script instead (hand edits to doors
+go in data/campus/doors.json). Output is sorted and one feature per line so diffs
+stay readable. Map data © OpenStreetMap contributors, ODbL.
 
 Usage:
     python3 tools/osm_import/import_osm.py            # fetch from Overpass
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 import urllib.error
@@ -24,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 INVENTORY_PATH = REPO / "data/campus/inventory.json"
 OUTPUT_PATH = REPO / "data/osm/buildings.geojson"
+ENTRANCES_PATH = REPO / "data/osm/entrances.geojson"
 CACHE_PATH = REPO / "build/cache/overpass-buildings.json"
 
 # south, west, north, east. Covers the main campus, East Campus and the athletics fields.
@@ -34,6 +37,13 @@ ENDPOINTS = (
 )
 USER_AGENT = "WatPath/0.1 (https://github.com/yutoc05/watpath)"
 COORDINATE_DIGITS = 7
+# An entrance node belongs to a building if it's this close to the outline. Most
+# sit exactly on it (they're vertices of the building way).
+ENTRANCE_SNAP_METERS = 2.0
+# Doors the public can't use: alarmed emergency exits, loading docks, staff-only.
+EXCLUDED_ENTRANCE_TYPES = {"emergency", "service"}
+EXCLUDED_ACCESS = {"private", "no"}
+ENTRANCE_TAGS = ("entrance", "name", "ref", "level", "wheelchair", "door", "automatic_door", "access")
 
 Point = tuple[float, float]  # (lon, lat), GeoJSON order
 Ring = list[Point]
@@ -43,7 +53,7 @@ def overpass_query() -> str:
     s, w, n, e = BBOX
     return (
         "[out:json][timeout:90];"
-        f'(way["building"]({s},{w},{n},{e});relation["building"]({s},{w},{n},{e}););'
+        f'(way["building"]({s},{w},{n},{e});relation["building"]({s},{w},{n},{e});node["entrance"]({s},{w},{n},{e}););'
         "out geom;"
     )
 
@@ -179,6 +189,51 @@ def build_features(inventory: list[dict], elements: list[dict]) -> tuple[list[di
     return features, missing
 
 
+def local_meters(point: Point, origin_lat: float) -> tuple[float, float]:
+    """Equirectangular approximation: plenty for snapping within a few meters."""
+    lon, lat = point
+    return lon * 111_320 * math.cos(math.radians(origin_lat)), lat * 110_574
+
+
+def distance_to_ring(point: Point, ring: list[list[float]]) -> float:
+    px, py = local_meters(point, point[1])
+    best = math.inf
+    for (x0, y0), (x1, y1) in zip(ring, ring[1:]):
+        ax, ay = local_meters((x0, y0), point[1])
+        bx, by = local_meters((x1, y1), point[1])
+        dx, dy = bx - ax, by - ay
+        t = 0.0 if dx == dy == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)))
+        best = min(best, math.hypot(px - (ax + t * dx), py - (ay + t * dy)))
+    return best
+
+
+def build_entrances(elements: list[dict], outlines: list[dict]) -> list[dict]:
+    """Entrance nodes on in-scope building outlines, assigned to the nearest building."""
+    features = []
+    for element in elements:
+        tags = element.get("tags", {})
+        if element["type"] != "node" or "entrance" not in tags:
+            continue
+        if tags["entrance"] in EXCLUDED_ENTRANCE_TYPES or tags.get("access") in EXCLUDED_ACCESS:
+            continue
+        point = (element["lon"], element["lat"])
+        distance, code = min(
+            ((min(distance_to_ring(point, ring) for ring in f["geometry"]["coordinates"]), f["properties"]["code"]) for f in outlines),
+            default=(math.inf, None),
+        )
+        if distance > ENTRANCE_SNAP_METERS:
+            continue
+        properties = {"code": code, "osmId": f'node/{element["id"]}'}
+        properties.update({key: tags[key] for key in ENTRANCE_TAGS if key in tags})
+        features.append({
+            "type": "Feature",
+            "properties": properties,
+            "geometry": {"type": "Point", "coordinates": [round(point[0], COORDINATE_DIGITS), round(point[1], COORDINATE_DIGITS)]},
+        })
+    features.sort(key=lambda f: (f["properties"]["code"], f["properties"]["osmId"]))
+    return features
+
+
 def write_feature_collection(path: Path, features: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(feature, separators=(",", ":"), sort_keys=True) for feature in features]
@@ -199,11 +254,19 @@ def main() -> int:
         CACHE_PATH.write_text(json.dumps(response), encoding="utf-8")
 
     inventory = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))["buildings"]
-    features, missing = build_features(inventory, response.get("elements", []))
+    elements = response.get("elements", [])
+    features, missing = build_features(inventory, elements)
     write_feature_collection(OUTPUT_PATH, features)
+    entrances = build_entrances(elements, features)
+    write_feature_collection(ENTRANCES_PATH, entrances)
 
     matched = len(inventory) - len(missing)
     print(f"Wrote {len(features)} outline parts for {matched}/{len(inventory)} buildings to {OUTPUT_PATH.relative_to(REPO)}")
+    with_doors = {f["properties"]["code"] for f in entrances}
+    print(f"Wrote {len(entrances)} entrances on {len(with_doors)} buildings to {ENTRANCES_PATH.relative_to(REPO)}")
+    no_doors = sorted({e["code"] for e in inventory} - with_doors)
+    if no_doors:
+        print(f"No mapped entrances in OSM (survey needed): {', '.join(no_doors)}")
     no_levels = sorted({f["properties"]["code"] for f in features if f["properties"]["levels"] is None})
     if no_levels:
         print(f"No building:levels in OSM (compiler will estimate): {', '.join(no_levels)}")

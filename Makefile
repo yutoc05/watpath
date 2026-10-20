@@ -1,7 +1,7 @@
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 SIMULATOR ?= iPhone 17
 
-.PHONY: help project osm data test test-python test-swift sim device spike-sim spike-device clean
+.PHONY: help project osm data test test-python test-swift uitest sim device spike-sim spike-device clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -22,6 +22,10 @@ test-python: ## Run tool tests
 
 test-swift: ## Run WatPathKit tests
 	swift test --package-path Packages/WatPathKit
+
+uitest: project data ## Run the UI flow tests in the Simulator
+	xcodebuild test -project WatPath.xcodeproj -scheme WatPath -derivedDataPath build/DerivedData \
+		-destination "platform=iOS Simulator,name=$(SIMULATOR)" -quiet
 
 sim: project data ## Build and launch in the Simulator
 	tools/run.sh simulator "$(SIMULATOR)"

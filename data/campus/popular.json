@@ -1,0 +1,15 @@
+{
+  "comment": "Curated 'Popular Locations' shown in search, in order. Entries are {\"building\": code} or {\"door\": id}.",
+  "places": [
+    { "building": "SLC" },
+    { "building": "DC" },
+    { "building": "MC" },
+    { "building": "LIB" },
+    { "building": "PAC" },
+    { "building": "QNC" },
+    { "building": "PSE" },
+    { "building": "E5" },
+    { "building": "CIF" },
+    { "building": "HH" }
+  ]
+}

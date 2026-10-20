@@ -32,6 +32,11 @@ targets:
         product: CampusGeo
       - package: WatPathKit
         product: CampusModel
+      - package: WatPathKit
+        product: CampusSearch
+    scheme:
+      testTargets:
+        - WatPathUITests
     preBuildScripts:
       - name: Check campus bundle
         script: '"${SRCROOT}/tools/check_bundle.sh"'
@@ -52,3 +57,17 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+  WatPathUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: AppUITests
+    dependencies:
+      - target: WatPath
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ca.yutochau.watpath.uitests
+        SWIFT_DEFAULT_ACTOR_ISOLATION: nonisolated
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic

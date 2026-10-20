@@ -87,4 +87,13 @@ public struct PinholeProjector: Sendable {
         let scale = pose.focalLength / depth
         return SIMD2(viewportSize.x / 2 + dot(v, pose.right) * scale, viewportSize.y / 2 - dot(v, pose.up) * scale)
     }
+
+    /// The point at `height` drawn at `screen`, or nil if that pixel shows sky.
+    public func unproject(_ screen: SIMD2<Double>, height: Double = 0) -> SIMD3<Double>? {
+        let x = (screen.x - viewportSize.x / 2) / pose.focalLength
+        let y = (viewportSize.y / 2 - screen.y) / pose.focalLength
+        let ray = pose.forward + x * pose.right + y * pose.up
+        guard ray.z < -1e-9 else { return nil }
+        return pose.eye + ray * ((height - pose.eye.z) / ray.z)
+    }
 }
