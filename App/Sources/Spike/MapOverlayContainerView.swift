@@ -1,8 +1,6 @@
 import CampusGeo
 import CampusModel
-import Combine
 import MapKit
-import RealityKit
 import UIKit
 
 /// Live numbers for the spike HUD.
@@ -29,26 +27,22 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
     }
 
     let mapView = MKMapView()
-    let pathView = ARView(frame: .zero, cameraMode: .nonAR, automaticallyConfigureSession: false)
+    let pathView: PathSceneView
     let plane: MapPlane
     let campus: CampusBundle
     /// Where scripted spike runs point the camera: the middle of MC.
     let spikeCenter: GeoCoordinate
 
-    var cameraModel: MapKitCameraModel
+    var cameraModel: MapKitCameraModel {
+        didSet { pathView.cameraModel = cameraModel }
+    }
     var onStats: ((SpikeStats) -> Void)?
     /// Called every display frame with MapKit's current camera (used by probes).
     var frameObserver: ((MKMapCamera) -> Void)?
     private(set) var mode: Mode = .street
 
-    private let renderCamera = PerspectiveCamera()
-    private let world = AnchorEntity(world: .zero)
-    private var shellEntities: [Entity] = []
     private var displayLink: CADisplayLink?
-    private var renderSubscription: (any Cancellable)?
-    private var renderFrames = 0
-    /// Frames RealityKit has updated since launch (frame-rate probes diff this).
-    private(set) var totalRenderFrames = 0
+    private var renderedFramesAtWindowStart = 0
     private var statsWindowStart = CACurrentMediaTime()
     private(set) var stats = SpikeStats()
     private let alignmentOutline: [GeoCoordinate]
@@ -58,6 +52,8 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
         self.campus = campus
         self.cameraModel = cameraModel
         plane = MapPlane(origin: campus.origin)
+        pathView = PathSceneView(plane: plane)
+        pathView.cameraModel = cameraModel
         var outline = campus.building(code: "MC")?.parts.first?.outline ?? []
         if outline.count > 1, outline.first == outline.last { outline.removeLast() }
         alignmentOutline = outline
@@ -72,21 +68,9 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
         mapView.camera = MKMapCamera(lookingAtCenter: spikeCenter.clCoordinate, fromDistance: 900, pitch: 45, heading: 0)
         addSubview(mapView)
 
-        pathView.isUserInteractionEnabled = false
-        pathView.environment.background = .color(.black)
-        pathView.renderOptions = [.disableMotionBlur, .disableDepthOfField, .disableGroundingShadows, .disableCameraGrain, .disableAREnvironmentLighting]
         pathView.alpha = 0
         pathView.isHidden = true
-        renderCamera.camera.fieldOfViewOrientation = .vertical
-        world.addChild(renderCamera)
-        pathView.scene.addAnchor(world)
         addSubview(pathView)
-        renderSubscription = pathView.scene.subscribe(to: SceneEvents.Update.self) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.renderFrames += 1
-                self?.totalRenderFrames += 1
-            }
-        }
 
         setUpControls()
     }
@@ -124,19 +108,18 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
         return SIMD2(Double(insets.left - insets.right) / 2, Double(insets.top - insets.bottom) / 2)
     }
 
-    func loadShells(_ complexity: ShellMeshFactory.Complexity) {
-        shellEntities.forEach { $0.removeFromParent() }
+    func loadShells(_ complexity: CampusSceneBuilder.Complexity) {
         do {
             let start = CACurrentMediaTime()
-            let result = try ShellMeshFactory(plane: plane).makeEntities(for: campus, complexity: complexity, highlight: "MC")
-            for entity in result.entities { world.addChild(entity) }
-            shellEntities = result.entities
-            stats.triangles = result.triangles
-            stats.entities = result.entities.count
+            let scene = try CampusSceneBuilder(plane: plane).build(campus, complexity: complexity)
+            pathView.load(scene)
+            pathView.setHighlightedBuilding("MC")
+            stats.triangles = scene.triangles
+            stats.entities = scene.entities.count
             SpikeLog.emit("shells", ShellReport(
                 complexity: complexity.rawValue,
-                entities: result.entities.count,
-                triangles: result.triangles,
+                entities: scene.entities.count,
+                triangles: scene.triangles,
                 buildMilliseconds: (CACurrentMediaTime() - start) * 1000
             ))
         } catch {
@@ -175,8 +158,8 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
         frameObserver?(mapView.camera)
         let now = CACurrentMediaTime()
         if now - statsWindowStart >= 0.5 {
-            stats.renderFPS = Double(renderFrames) / (now - statsWindowStart)
-            renderFrames = 0
+            stats.renderFPS = Double(pathView.renderedFrames - renderedFramesAtWindowStart) / (now - statsWindowStart)
+            renderedFramesAtWindowStart = pathView.renderedFrames
             statsWindowStart = now
             measureAlignment()
             onStats?(stats)
@@ -191,19 +174,7 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
 
     private func syncRenderCamera() {
         let state = MapCameraState(mapView.camera)
-        guard bounds.height > 0 else { return }
-        let pose = CameraPose(state: state, plane: plane, model: cameraModel, viewportSize: viewportSize, anchor: cameraAnchor)
-        // Camera looks down its local -z with +y up, so its z axis points backward.
-        renderCamera.transform = Transform(matrix: float4x4(
-            SIMD4(RenderSpace.point(pose.right), 0),
-            SIMD4(RenderSpace.point(pose.up), 0),
-            SIMD4(RenderSpace.point(-pose.forward), 0),
-            SIMD4(RenderSpace.point(pose.eye), 1)
-        ))
-        let distance = Float(state.distance)
-        renderCamera.camera.near = max(0.25, distance * 0.02)
-        renderCamera.camera.far = distance * 40 + 5_000
-        renderCamera.camera.fieldOfViewInDegrees = Float(cameraModel.verticalFieldOfView)
+        pathView.sync(to: state, anchor: cameraAnchor)
         stats.camera = state
     }
 
@@ -221,7 +192,7 @@ final class MapOverlayContainerView: UIView, MKMapViewDelegate {
             guard let model = projector.project(point), bounds.contains(CGPoint(x: model.x, y: model.y)) else { continue }
             let drawn = mapView.convert(coordinate.clCoordinate, toPointTo: self)
             mapKitSquares.append(squaredDistance(drawn, model))
-            if let rendered = pathView.project(RenderSpace.point(point)) {
+            if let rendered = pathView.renderedPoint(point) {
                 renderSquares.append(squaredDistance(pathView.convert(rendered, to: self), model))
             }
         }

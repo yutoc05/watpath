@@ -79,11 +79,11 @@ struct SpikeRunner {
         let previousMode = view.mode
         view.setMode(.path, animated: false)
         var reports: [PerformanceReport] = []
-        for complexity in ShellMeshFactory.Complexity.allCases {
+        for complexity in CampusSceneBuilder.Complexity.allCases {
             view.loadShells(complexity)
             _ = await settle(distance: 600, pitch: 60)
             let recorder = Recorder()
-            let renderStart = view.totalRenderFrames
+            let renderStart = view.pathView.renderedFrames
             view.frameObserver = { [view] camera in
                 recorder.timestamps.append(CACurrentMediaTime())
                 guard let next = camera.copy() as? MKMapCamera else { return }
@@ -101,7 +101,7 @@ struct SpikeRunner {
                 complexity: complexity.rawValue,
                 entities: view.stats.entities,
                 triangles: view.stats.triangles,
-                renderFPS: Double(view.totalRenderFrames - renderStart) / duration,
+                renderFPS: Double(view.pathView.renderedFrames - renderStart) / duration,
                 displayFPS: Double(intervals.count) / duration,
                 droppedFramePercent: 100 * Double(intervals.filter { $0 > refresh * 1.5 }.count) / Double(max(intervals.count, 1))
             ))

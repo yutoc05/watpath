@@ -11,7 +11,7 @@ final class SpikeModel {
     var mode: MapOverlayContainerView.Mode = .street {
         didSet { view?.setMode(mode, animated: true) }
     }
-    var complexity: ShellMeshFactory.Complexity = .shells {
+    var complexity: CampusSceneBuilder.Complexity = .shells {
         didSet { view?.loadShells(complexity) }
     }
     /// Launch with `-mapElevation flat` to start flat.

@@ -50,7 +50,7 @@ struct CameraSpikeView: View {
 
                 HStack {
                     Picker("Geometry", selection: $model.complexity) {
-                        ForEach(ShellMeshFactory.Complexity.allCases) { Text($0.rawValue).tag($0) }
+                        ForEach(CampusSceneBuilder.Complexity.allCases) { Text($0.rawValue).tag($0) }
                     }
                     Picker("Elevation", selection: $model.elevation) {
                         ForEach(SpikeModel.Elevation.allCases) { Text($0.rawValue).tag($0) }

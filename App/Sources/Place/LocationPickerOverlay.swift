@@ -17,7 +17,8 @@ struct LocationPickerOverlay: View {
             }
             VStack {
                 VStack(spacing: 4) {
-                    Text("Choose location on map").font(.headline)
+                    Text(model.mapMode == .path ? "Choose location inside the path" : "Choose location on map")
+                        .font(.headline)
                     Text(model.pickerCoordinate?.formatted ?? " ")
                         .accessibilityIdentifier("pickerCoordinate")
                         .font(.subheadline.monospacedDigit())

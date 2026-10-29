@@ -1,6 +1,9 @@
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 SIMULATOR ?= iPhone 17
 
+# The data tools need shapely; uv provides it (and pytest) without a virtualenv to manage.
+PYTHON := uv run --no-project --with-requirements tools/requirements.txt python
+
 .PHONY: help project osm data test test-python test-swift uitest sim device spike-sim spike-device clean
 
 help: ## List targets
@@ -13,12 +16,12 @@ osm: ## Re-import building outlines from OpenStreetMap (needs network)
 	python3 tools/osm_import/import_osm.py
 
 data: ## Compile data/ into build/CampusBundle
-	python3 tools/compiler/compile.py
+	$(PYTHON) tools/compiler/compile.py
 
 test: test-python test-swift ## Run all tests
 
 test-python: ## Run tool tests
-	uv run --no-project --with pytest pytest -q
+	$(PYTHON) -m pytest -q
 
 test-swift: ## Run WatPathKit tests
 	swift test --package-path Packages/WatPathKit

@@ -48,5 +48,6 @@ final class DoorMarkerView: MKMarkerAnnotationView {
         case .exit, .stairwell: .systemGray
         }
         accessibilityLabel = door.name
+        accessibilityIdentifier = "door-\(door.id)"
     }
 }

@@ -10,6 +10,15 @@ import os
 /// Views read it; the map controller reports taps and camera moves back into it.
 @Observable
 final class AppModel {
+    enum MapMode: String, CaseIterable, Identifiable, Sendable {
+        /// Apple's map with campus doors.
+        case street
+        /// The 3D campus model on black, as if seeing through walls.
+        case path
+
+        var id: Self { self }
+    }
+
     enum Activity: Equatable {
         case browsing
         case searching
@@ -23,6 +32,12 @@ final class AppModel {
 
     private(set) var selection: Place?
     private(set) var activity = Activity.browsing
+    var mapMode = MapMode.street
+    /// Path Map: floors the user picked (building code → index into its floors).
+    /// Every other building shows its default floor, so one floor each.
+    private(set) var floorChoices: [String: Int] = [:]
+    /// Path Map: the building under the middle of the map, as the map reports it.
+    var centeredBuilding: String?
     /// The camera moves to show this place; a new request (new id) per move.
     private(set) var cameraRequest: CameraRequest?
     /// Map center while picking a location, updated as the map moves.
@@ -51,6 +66,9 @@ final class AppModel {
         recentsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("recents.json")
         recents = RecentList()
+        if ProcessInfo.processInfo.arguments.contains("-resetRecents"), let recentsURL {
+            try? FileManager.default.removeItem(at: recentsURL)  // UI tests start from a clean slate
+        }
         recents = loadRecents()
     }
 
@@ -79,10 +97,13 @@ final class AppModel {
 
     // MARK: Choose location on map
 
-    func beginPickingLocation() {
+    /// `insidePath` picks in the Path Map, where the pin snaps into buildings.
+    func beginPickingLocation(insidePath: Bool = false) {
         selection = nil
+        if insidePath { mapMode = .path }
         activity = .pickingLocation
     }
+
 
     func finishPickingLocation() {
         guard let coordinate = pickerCoordinate else { return cancelPickingLocation() }
@@ -91,6 +112,36 @@ final class AppModel {
 
     func cancelPickingLocation() {
         activity = .browsing
+    }
+
+    // MARK: Floors
+
+    /// The building the floor picker controls: the selected building (or the
+    /// selected door's), else the one in the middle of the Path Map.
+    var focusedBuilding: Building? {
+        switch selection {
+        case .campus(.building(let code)): campus.building(code: code)
+        case .campus(.door(let id)): campus.door(id: id).flatMap { campus.building(code: $0.building) }
+        default: centeredBuilding.flatMap { campus.building(code: $0) }
+        }
+    }
+
+    /// The Path Map floor shown for `building`, or nil if it has none (it's drawn as a footprint).
+    func displayedFloorIndex(of building: Building) -> Int? {
+        floorChoices[building.code] ?? building.defaultFloorIndex
+    }
+
+    /// Only floors the Path Map shows can be picked.
+    func showFloor(_ index: Int, of building: Building) {
+        guard building.mappedFloorIndices.contains(index) else { return }
+        floorChoices[building.code] = index == building.defaultFloorIndex ? nil : index
+    }
+
+    /// The floor shown for every building with Path Map floors, by code.
+    var displayedFloors: [String: Int] {
+        Dictionary(uniqueKeysWithValues: campus.buildings.compactMap { building in
+            displayedFloorIndex(of: building).map { (building.code, $0) }
+        })
     }
 
     // MARK: Location

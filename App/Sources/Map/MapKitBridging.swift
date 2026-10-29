@@ -21,11 +21,3 @@ nonisolated extension MapCameraState {
         )
     }
 }
-
-/// RealityKit is y-up with -z forward; our ENU frame is z-up. (east, north, up)
-/// maps to RealityKit (x, y, z) = (east, up, -north), a proper rotation.
-enum RenderSpace {
-    static func point(_ p: SIMD3<Double>) -> SIMD3<Float> {
-        SIMD3(Float(p.x), Float(p.z), Float(-p.y))
-    }
-}

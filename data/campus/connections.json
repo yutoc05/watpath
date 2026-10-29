@@ -1,0 +1,37 @@
+{
+  "comment": "Hand edits to bridges/tunnels/links by id (fields: name, kind, ends, verified, closed, hidden, note), plus connections OSM lacks under 'added' (same fields plus id and path, [[lon, lat], ...]). ends maps each building to the floor(s) the connection meets there, as signed in that building: {\"MC\": [\"3\"], \"QNC\": [\"2\"]}; a two-storey bridge lists both floors in the same order at each end. Ids come from data/osm/connections.geojson.",
+  "connections": {
+    "conn-w49785860": {"ends": {"ML": ["1"], "AL": ["B"], "EV1": ["1"]}, "verified": true},
+    "conn-w187712344": {"ends": {"AL": ["B"], "TC": ["B"]}, "verified": true},
+    "conn-w182197540": {"ends": {"QNC": ["2"], "B2": ["2"]}, "verified": true},
+    "conn-w280830431": {"kind": "link", "note": "Inside the HLTH complex."},
+    "conn-w137183050": {"ends": {"C2": ["3"], "DC": ["2"]}, "verified": true},
+    "conn-w182087258": {"ends": {"C2": ["2", "3"], "ESC": ["2", "3"]}, "verified": true},
+    "conn-w183247348": {"ends": {"MC": ["1"], "C2": ["B"]}, "verified": true},
+    "conn-w131828050": {"ends": {"EIT": ["3"], "DC": ["2"]}, "verified": true, "note": "The CIM block is part of DC here; its floor 2 is DC's floor 2."},
+    "conn-w182197541": {"ends": {"E2": ["3"], "DWE": ["3"]}, "verified": true},
+    "conn-w187714493": {"ends": {"RCH": ["2"], "DWE": ["1"]}, "verified": true},
+    "conn-w182286461": {"kind": "link", "ends": {"E2": ["2"], "E3": ["2"]}, "note": "E2 and E3 adjoin; E3's floor 2 links to E2 on the south side. E2's floor is assumed. Check on site."},
+    "conn-w182198718": {"ends": {"PHY": ["3"], "E2": ["3"]}, "verified": true},
+    "conn-w51856426": {"ends": {"E2": ["1"], "RCH": ["2"]}, "verified": true},
+    "conn-w175807556": {"ends": {"E3": ["4"], "E5": ["3"]}, "verified": true},
+    "conn-w626283189": {"ends": {"PSE": ["3"], "E6": ["3"]}, "verified": true},
+    "conn-w49785864": {"ends": {"EV1": ["1"], "HH": ["1"]}, "verified": true},
+    "conn-w189317460": {"hidden": true, "note": "Not a real connection."},
+    "conn-w182197539": {"ends": {"MC": ["3"], "QNC": ["2"]}, "verified": true},
+    "conn-w983281506": {"ends": {"SLC": ["2"], "MC": ["3"]}, "verified": true},
+    "conn-w364274039": {"ends": {"STC": ["3"], "NH": ["3"]}, "verified": true},
+    "conn-w145079151": {"kind": "link", "note": "PAC and SLC adjoin, without a bridge."}
+  },
+  "added": [
+    {"id": "conn-b1-esc", "kind": "bridge", "ends": {"B1": ["2", "3"], "ESC": ["2", "3"]}, "verified": true, "path": [[-80.5430348, 43.4709656], [-80.5429463, 43.4709981]]},
+    {"id": "conn-esc-eit-bridge", "kind": "bridge", "ends": {"ESC": ["3", "4"], "EIT": ["3", "4"]}, "verified": true, "path": [[-80.5424686, 43.4711667], [-80.5423807, 43.4711999]]},
+    {"id": "conn-esc-eit-tunnel", "kind": "tunnel", "ends": {"ESC": ["1"], "EIT": ["1"]}, "verified": true, "path": [[-80.5424504, 43.471141], [-80.5423625, 43.4711742]]},
+    {"id": "conn-cph-dwe", "kind": "bridge", "ends": {"CPH": ["3"], "DWE": ["3"]}, "verified": true, "path": [[-80.5389942, 43.4705016], [-80.5389644, 43.4704326]]},
+    {"id": "conn-tc-sch", "kind": "tunnel", "ends": {"TC": ["B"], "SCH": ["1"]}, "verified": true, "path": [[-80.5410748, 43.4688342], [-80.5405293, 43.4690341]]},
+    {"id": "conn-dc-e3", "kind": "link", "ends": {"DC": ["2"], "E3": ["3"]}, "verified": true, "note": "The CIM block is part of DC here; its floor 2 is DC's floor 2.", "path": [[-80.541153, 43.4718685], [-80.5411035, 43.4718058]]},
+    {"id": "conn-b1-b2", "kind": "link", "ends": {"B1": ["2"], "B2": ["2"]}, "note": "Adjoining buildings; the floors are assumed. Check on site.", "path": [[-80.5432576, 43.4709429], [-80.5433348, 43.4708976]]},
+    {"id": "conn-b2-stc", "kind": "link", "ends": {"B2": ["2"], "STC": ["2"]}, "note": "Adjoining buildings; the floors are assumed. Check on site.", "path": [[-80.5436588, 43.4707048], [-80.5436185, 43.4706387]]},
+    {"id": "conn-e5-pse", "kind": "link", "ends": {"E5": ["3"], "PSE": ["3"]}, "note": "Adjoining buildings; the floors are assumed. Check on site.", "path": [[-80.5398882, 43.4728528], [-80.5398008, 43.4728867]]}
+  ]
+}

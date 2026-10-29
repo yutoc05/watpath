@@ -89,7 +89,7 @@ private struct BuildingDetails: View {
             if !building.displayAliases.isEmpty {
                 Fact(label: "Also called", value: building.displayAliases.joined(separator: ", "))
             }
-            Fact(label: "Floors", value: building.levelsEstimated ? "Not known yet" : "\(building.levelCount)")
+            Fact(label: "Floors", value: building.levelsEstimated ? "Not known yet" : building.floorSummary)
         }
         let doors = model.campus.doors(of: building)
         VStack(alignment: .leading, spacing: 10) {

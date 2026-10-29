@@ -84,6 +84,11 @@ struct SearchPanel: View {
             } label: {
                 PlaceRow(title: "Choose location on map", subtitle: "Move the map to place a pin", systemImage: "mappin.and.ellipse")
             }
+            Button {
+                model.beginPickingLocation(insidePath: true)
+            } label: {
+                PlaceRow(title: "Choose location inside the path", subtitle: "Place a pin inside a building", systemImage: "building.2.crop.circle")
+            }
         }
         if !model.recents.items.isEmpty {
             Section {

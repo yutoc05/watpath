@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Import building outlines and entrances for the in-scope inventory from OpenStreetMap.
+"""Import building outlines, entrances and building-to-building connections for the
+in-scope inventory from OpenStreetMap.
 
-Writes data/osm/buildings.geojson and data/osm/entrances.geojson. Both are
-generated: never hand-edit them, re-run this script instead (hand edits to doors
-go in data/campus/doors.json). Output is sorted and one feature per line so diffs
-stay readable. Map data © OpenStreetMap contributors, ODbL.
+Writes data/osm/buildings.geojson, entrances.geojson and connections.geojson. All
+are generated: never hand-edit them, re-run this script instead (hand edits go in
+data/campus/doors.json and connections.json). Output is sorted and one feature per
+line so diffs stay readable. Map data © OpenStreetMap contributors, ODbL.
 
 Usage:
     python3 tools/osm_import/import_osm.py            # fetch from Overpass
@@ -27,9 +28,10 @@ REPO = Path(__file__).resolve().parents[2]
 INVENTORY_PATH = REPO / "data/campus/inventory.json"
 OUTPUT_PATH = REPO / "data/osm/buildings.geojson"
 ENTRANCES_PATH = REPO / "data/osm/entrances.geojson"
+CONNECTIONS_PATH = REPO / "data/osm/connections.geojson"
 CACHE_PATH = REPO / "build/cache/overpass-buildings.json"
 
-# south, west, north, east. Covers the main campus, East Campus and the athletics fields.
+# south, west, north, east. Covers the main campus and the athletics fields.
 BBOX = (43.4640, -80.5530, 43.4790, -80.5350)
 ENDPOINTS = (
     "https://overpass-api.de/api/interpreter",
@@ -44,6 +46,13 @@ ENTRANCE_SNAP_METERS = 2.0
 EXCLUDED_ENTRANCE_TYPES = {"emergency", "service"}
 EXCLUDED_ACCESS = {"private", "no"}
 ENTRANCE_TAGS = ("entrance", "name", "ref", "level", "wheelchair", "door", "automatic_door", "access")
+# Pedestrian ways that can link buildings: bridges, tunnels and indoor corridors.
+CONNECTION_HIGHWAYS = {"footway", "corridor", "steps", "path", "pedestrian"}
+# A connector "reaches" a building within this distance of its outline.
+CONNECTION_SNAP_METERS = 3.0
+# Indoor ways must run at least this far outside every outline to count as a link
+# between buildings rather than a corridor inside one.
+CONNECTION_MIN_OUTSIDE_METERS = 3.0
 
 Point = tuple[float, float]  # (lon, lat), GeoJSON order
 Ring = list[Point]
@@ -53,7 +62,9 @@ def overpass_query() -> str:
     s, w, n, e = BBOX
     return (
         "[out:json][timeout:90];"
-        f'(way["building"]({s},{w},{n},{e});relation["building"]({s},{w},{n},{e});node["entrance"]({s},{w},{n},{e}););'
+        f'(way["building"]({s},{w},{n},{e});relation["building"]({s},{w},{n},{e});node["entrance"]({s},{w},{n},{e});'
+        f'way["highway"]["indoor"="yes"]({s},{w},{n},{e});way["highway"]["bridge"]({s},{w},{n},{e});'
+        f'way["highway"]["tunnel"]({s},{w},{n},{e});way["highway"="corridor"]({s},{w},{n},{e}););'
         "out geom;"
     )
 
@@ -151,12 +162,10 @@ def matches(entry: dict, tags: dict) -> bool:
     # separate "outline" element carrying the same ref, which is what we want.
     if tags.get("building") == "bridge" or tags.get("type") == "building":
         return False
+    # An outline matching either the ref or the name belongs to the building, so one
+    # building can take in a neighbor OSM draws separately (CIF and its Field House).
     rule = entry["osm"]
-    if "ref" in rule:
-        return tags.get("ref") == rule["ref"]
-    if "name" in rule:
-        return tags.get("name") == rule["name"]
-    return False
+    return ("ref" in rule and tags.get("ref") == rule["ref"]) or ("name" in rule and tags.get("name") == rule["name"])
 
 
 def rounded(ring: Ring) -> list[list[float]]:
@@ -234,6 +243,106 @@ def build_entrances(elements: list[dict], outlines: list[dict]) -> list[dict]:
     return features
 
 
+def is_connection_candidate(tags: dict) -> bool:
+    if tags.get("building") == "bridge" or tags.get("highway") not in CONNECTION_HIGHWAYS:
+        return False
+    return bool(
+        tags.get("indoor") == "yes" or tags.get("bridge") or tags.get("tunnel")
+        or tags.get("covered") == "yes" or tags["highway"] == "corridor"
+    )
+
+
+def buildings_near(point: Point, outlines: list[dict], tolerance: float) -> set[str]:
+    """Codes of buildings containing `point` or within `tolerance` meters of it.
+    Buildings that share a wall can both be near one point; that's how links
+    between adjoining buildings (E3–E5) are found."""
+    codes = set()
+    for feature in outlines:
+        rings = feature["geometry"]["coordinates"]
+        inside = contains(rings[0], point) and not any(contains(hole, point) for hole in rings[1:])
+        if inside or min(distance_to_ring(point, ring) for ring in rings) <= tolerance:
+            codes.add(feature["properties"]["code"])
+    return codes
+
+
+def connection_kind(tags: list[dict]) -> str:
+    def below(value: str | None) -> bool:
+        return value is not None and value.lstrip().startswith("-")
+    if any(t.get("tunnel") or below(t.get("layer")) or below(t.get("level")) for t in tags):
+        return "tunnel"
+    if any(t.get("bridge") or (t.get("layer") or "0") not in ("0", "") for t in tags):
+        return "bridge"
+    return "link"
+
+
+def build_connections(elements: list[dict], outlines: list[dict]) -> list[dict]:
+    """Bridges, tunnels and indoor links joining two or more in-scope buildings.
+
+    Candidate ways that share nodes are grouped (a tunnel is often several ways),
+    and a group becomes a connection if it reaches at least two buildings.
+    """
+    candidates = []
+    for element in elements:
+        tags = element.get("tags", {})
+        if element["type"] != "way" or not is_connection_candidate(tags):
+            continue
+        points = geometry_points(element.get("geometry", []))
+        if len(points) < 2:
+            continue
+        outside = sum(
+            math.dist(local_meters(a, a[1]), local_meters(b, a[1]))
+            for a, b in zip(points, points[1:])
+            if not buildings_near(a, outlines, 0) or not buildings_near(b, outlines, 0)
+        )
+        if tags.get("bridge") or tags.get("tunnel") or outside >= CONNECTION_MIN_OUTSIDE_METERS:
+            candidates.append((element, points))
+
+    # Union-find over ways that share a node position.
+    parent = list(range(len(candidates)))
+
+    def root(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    first_way_at: dict[Point, int] = {}
+    for index, (_, points) in enumerate(candidates):
+        for point in points:
+            other = first_way_at.setdefault(point, index)
+            parent[root(index)] = root(other)
+    groups: dict[int, list[int]] = {}
+    for index in range(len(candidates)):
+        groups.setdefault(root(index), []).append(index)
+
+    features = []
+    for members in groups.values():
+        ways = [candidates[i] for i in sorted(members, key=lambda i: candidates[i][0]["id"])]
+        reached = set().union(*(buildings_near(p, outlines, CONNECTION_SNAP_METERS) for _, pts in ways for p in pts))
+        if len(reached) < 2:
+            continue
+        tags = [way.get("tags", {}) for way, _ in ways]
+        properties = {
+            "id": f'conn-w{ways[0][0]["id"]}',
+            "buildings": sorted(reached),
+            "kind": connection_kind(tags),
+            "osmIds": [f'way/{way["id"]}' for way, _ in ways],
+        }
+        names = sorted({t["name"] for t in tags if "name" in t})
+        if names:
+            properties["name"] = names[0]
+        levels = sorted({t[key] for t in tags for key in ("level", "layer") if key in t})
+        if levels:
+            properties["osmLevels"] = levels
+        features.append({
+            "type": "Feature",
+            "properties": properties,
+            "geometry": {"type": "MultiLineString", "coordinates": [rounded(pts) for _, pts in ways]},
+        })
+    features.sort(key=lambda f: (f["properties"]["buildings"], f["properties"]["id"]))
+    return features
+
+
 def write_feature_collection(path: Path, features: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(feature, separators=(",", ":"), sort_keys=True) for feature in features]
@@ -259,11 +368,14 @@ def main() -> int:
     write_feature_collection(OUTPUT_PATH, features)
     entrances = build_entrances(elements, features)
     write_feature_collection(ENTRANCES_PATH, entrances)
+    connections = build_connections(elements, features)
+    write_feature_collection(CONNECTIONS_PATH, connections)
 
     matched = len(inventory) - len(missing)
     print(f"Wrote {len(features)} outline parts for {matched}/{len(inventory)} buildings to {OUTPUT_PATH.relative_to(REPO)}")
     with_doors = {f["properties"]["code"] for f in entrances}
     print(f"Wrote {len(entrances)} entrances on {len(with_doors)} buildings to {ENTRANCES_PATH.relative_to(REPO)}")
+    print(f"Wrote {len(connections)} building-to-building connections to {CONNECTIONS_PATH.relative_to(REPO)}")
     no_doors = sorted({e["code"] for e in inventory} - with_doors)
     if no_doors:
         print(f"No mapped entrances in OSM (survey needed): {', '.join(no_doors)}")

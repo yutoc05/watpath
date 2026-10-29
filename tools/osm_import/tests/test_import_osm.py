@@ -1,4 +1,4 @@
-from import_osm import assemble_rings, build_entrances, build_features, element_polygons, signed_area
+from import_osm import assemble_rings, build_connections, build_entrances, build_features, element_polygons, signed_area
 
 
 def test_assemble_rings_joins_reversed_segments():
@@ -62,3 +62,42 @@ def test_entrances_snap_to_the_nearest_outline_and_skip_unusable_doors():
     entrances = build_entrances(elements, outlines)
     assert [e["properties"]["osmId"] for e in entrances] == ["node/1", "node/2"]
     assert entrances[0]["properties"] == {"code": "MC", "osmId": "node/1", "entrance": "main", "wheelchair": "yes"}
+
+
+def test_connections_join_buildings_including_ones_that_share_a_wall():
+    def box(code, x0, x1):
+        ring = [[x0, 0.0], [x1, 0.0], [x1, 0.0009], [x0, 0.0009], [x0, 0.0]]
+        return {"properties": {"code": code}, "geometry": {"coordinates": [ring]}}
+
+    # A and B share a wall at x = 0.001; C stands 0.001° (~80 m) east of B.
+    outlines = [box("A", 0.0, 0.001), box("B", 0.001, 0.002), box("C", 0.003, 0.004)]
+
+    def way(way_id, coords, **tags):
+        return {"type": "way", "id": way_id, "tags": tags, "geometry": [{"lon": x, "lat": y} for x, y in coords]}
+
+    elements = [
+        # Short bridge across the shared A/B wall.
+        way(10, [(0.0009, 0.0004), (0.0011, 0.0004)], highway="footway", bridge="yes", layer="1"),
+        # Tunnel from B to C in two pieces that share a node.
+        way(21, [(0.0019, 0.0004), (0.0025, 0.0004)], highway="footway", tunnel="yes", layer="-1"),
+        way(20, [(0.0025, 0.0004), (0.0031, 0.0004)], highway="footway", tunnel="yes", layer="-1"),
+        # A corridor entirely inside A: not a connection.
+        way(30, [(0.0002, 0.0002), (0.0008, 0.0002)], highway="corridor", indoor="yes"),
+        # An outdoor sidewalk: not a candidate at all.
+        way(40, [(0.0009, 0.0004), (0.0031, 0.0004)], highway="footway"),
+    ]
+    connections = build_connections(elements, outlines)
+    summary = [(c["properties"]["buildings"], c["properties"]["kind"], c["properties"]["osmIds"]) for c in connections]
+    assert summary == [(["A", "B"], "bridge", ["way/10"]), (["B", "C"], "tunnel", ["way/20", "way/21"])]
+
+
+def test_an_outline_matching_either_ref_or_name_joins_the_building():
+    square = [{"lon": x, "lat": y} for x, y in [(0, 0), (1, 0), (1, 1), (0, 0)]]
+    elements = [
+        {"type": "way", "id": 1, "tags": {"building": "yes", "ref": "CIF"}, "geometry": square},
+        {"type": "way", "id": 2, "tags": {"building": "yes", "name": "Feridun Hamdullahpur Field House"}, "geometry": square},
+    ]
+    inventory = [{"code": "CIF", "osm": {"ref": "CIF", "name": "Feridun Hamdullahpur Field House"}}]
+    features, missing = build_features(inventory, elements)
+    assert [(f["properties"]["code"], f["properties"]["osmId"]) for f in features] == [("CIF", "way/1"), ("CIF", "way/2")]
+    assert missing == []
