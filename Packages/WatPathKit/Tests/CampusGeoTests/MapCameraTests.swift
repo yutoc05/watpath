@@ -71,7 +71,7 @@ struct MapCameraTests {
 }
 
 /// Screen points recorded from real MapKit (iOS 27.1 Simulator, 402×874 pt view,
-/// safe-area anchor (0, 14)) during Spike S1. If MapKit changes its camera, these fail.
+/// safe-area anchor (0, 14)) when the model was measured. If MapKit changes its camera, these fail.
 struct MapKitFidelityTests {
     struct MapKitObservation {
         var center: GeoCoordinate

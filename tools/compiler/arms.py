@@ -51,14 +51,15 @@ def remove_bridge_arms(buildings: list[dict], connections: list[dict], frame: Lo
         lines = [LineString([frame.to_meters(p) for p in path["points"]]) for path in connection["paths"]]
         for code in connection["buildings"]:
             building = by_code[code]
-            body = _outline(building, frame)
+            body = outline(building, frame)
             opened = body.buffer(-ARM_RADIUS, join_style="mitre").buffer(ARM_RADIUS, join_style="mitre")
             arms = [thin for thin in polygons(body.difference(opened)) if sum(line.intersection(thin).length for line in lines) >= ARM_MIN_LENGTH]
             if arms:
                 building["parts"] = _parts_without(building, unary_union(arms), frame)
 
 
-def _outline(building: dict, frame: LocalFrame):
+def outline(building: dict, frame: LocalFrame):
+    """The building's whole footprint, in meters."""
     return unary_union([_polygon(part, frame) for part in building["parts"]])
 
 

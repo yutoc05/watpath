@@ -33,7 +33,7 @@ public struct CalibrationResult: Sendable, Codable {
 }
 
 /// Fits `MapKitCameraModel` by matching our camera against points MapKit
-/// projected itself (docs/PLAN.md §6.1).
+/// projected itself (docs/adr/001-camera-architecture.md).
 public enum CameraCalibrator {
     /// Error charged for a point the model puts behind the camera.
     private static let behindCameraError = 10_000.0

@@ -5,12 +5,13 @@ import Testing
 
 struct CampusBundleTests {
     let json = """
-    {"schemaVersion":8,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"© OpenStreetMap contributors",
+    {"schemaVersion":9,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"© OpenStreetMap contributors",
      "buildings":[{"code":"MC","name":"Mathematics & Computer","aliases":["Math & Computer"],"group":"core","priority":1,
        "levelsEstimated":false,"label":[-80.5436,43.4723],
        "floors":[{"name":"B","title":"Basement"},{"name":"1","title":"Floor 1"},{"name":"2","title":"Floor 2"},{"name":"3","title":"Floor 3"}],
        "parts":[{"osmId":"way/1","outline":[[-80.544,43.472],[-80.543,43.472],[-80.543,43.473],[-80.544,43.472]],"holes":[]}]}],
      "corridors":[[[-80.5436,43.4723],[-80.5435,43.4723],[-80.5435,43.4724]]],
+     "dividers":[[[-80.544,43.472],[-80.544,43.473]]],
      "doors":[{"id":"MC-n1","building":"MC","name":"North main entrance","kind":"main","coordinate":[-80.5435,43.4729],
        "level":"1","accessible":true,"verified":false,"photos":[]},
       {"id":"MC-n2","building":"MC","name":"South exit","kind":"exit","coordinate":[-80.5436,43.4721],
@@ -42,6 +43,7 @@ struct CampusBundleTests {
         #expect(bundle.corridors.count == 1)
         #expect(bundle.corridors[0].count == 3)
         #expect(bundle.corridors[0][0] == .init(latitude: 43.4723, longitude: -80.5436))
+        #expect(bundle.dividers == [[.init(latitude: 43.472, longitude: -80.544), .init(latitude: 43.473, longitude: -80.544)]])
     }
 
     @Test func decodesDoorsAndLinksThemToBuildings() throws {
@@ -78,8 +80,8 @@ struct CampusBundleTests {
     }
 
     @Test func rejectsOtherSchemaVersions() {
-        let old = json.replacingOccurrences(of: "\"schemaVersion\":8", with: "\"schemaVersion\":7")
-        #expect(throws: CampusBundle.LoadError.unsupportedSchema(7)) {
+        let old = json.replacingOccurrences(of: "\"schemaVersion\":9", with: "\"schemaVersion\":8")
+        #expect(throws: CampusBundle.LoadError.unsupportedSchema(8)) {
             try CampusBundle.decode(Data(old.utf8))
         }
     }
@@ -126,6 +128,14 @@ struct CampusBundleTests {
                 }
             }
         }
+        // Buildings that touch get a hairline between them, but EV3 was built over part
+        // of EV2, and that block has no line through it.
+        #expect(!bundle.dividers.isEmpty)
+        let rings = { (code: String) in bundle.building(code: code)?.parts.map { $0.outline.map(plane.planar) } ?? [] }
+        let isInBoth = { (point: GeoCoordinate) in
+            [rings("EV2"), rings("EV3")].allSatisfy { parts in parts.contains { PolygonGeometry.contains([$0], plane.planar(point)) } }
+        }
+        #expect(!bundle.dividers.contains { $0.contains(where: isInBoth) })
         // Every end of a drawn bridge or tunnel has a line ending there for its floor numbers.
         for connection in drawn where !connection.paths.isEmpty {
             for end in connection.ends.indices {

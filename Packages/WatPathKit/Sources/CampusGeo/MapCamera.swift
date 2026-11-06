@@ -18,8 +18,8 @@ public struct MapCameraState: Sendable, Equatable, Codable {
     }
 }
 
-/// MapKit's undocumented camera constants, measured in Spike S1 by fitting
-/// `CameraCalibrator` to points MapKit projected itself (0.000 pt residual).
+/// MapKit's undocumented camera constants, measured by fitting `CameraCalibrator` to
+/// points MapKit projected itself (0.000 pt residual; docs/adr/001-camera-architecture.md).
 public struct MapKitCameraModel: Sendable, Equatable, Codable {
     /// Full vertical field of view, degrees.
     public var verticalFieldOfView: Double

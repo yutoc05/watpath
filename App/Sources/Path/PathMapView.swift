@@ -1,18 +1,24 @@
 import CampusGeo
 import CampusModel
+import CoreLocation
 import UIKit
 
-/// What floats over the Path Map in 2D: the thin lines of corridors, bridges and
-/// tunnels, building labels, the floor numbers at each end of a bridge or tunnel, and
-/// door markers. Positions come from projecting with MapKit's camera model every frame.
+/// The Path Map: an opaque view over the street map, with everything in it placed from
+/// MapKit's camera every frame. Buildings are flat footprints on black, with thin lines
+/// for corridors, bridges and tunnels, and on top of those labels, the floor numbers at
+/// each end of a bridge or tunnel, door markers, the pin and the user's location.
+/// Everything lies on one level, and moves together in one Core Animation transaction.
 ///
-/// It never takes touches, so every gesture reaches the map, even one that starts on
-/// a door marker; the map controller asks `door(at:)` when it sees a tap.
-final class PathAnnotationLayer: UIView {
+/// It never takes touches, so every gesture reaches the map underneath, even one that
+/// starts on a door marker; the map controller asks `door(at:)` when it sees a tap.
+final class PathMapView: UIView {
     /// Doors appear below this camera distance, as in Street Map.
     static let doorsVisibleBelowDistance = 1_400.0
     /// The width of every line, in points, at any zoom or tilt.
     private static let lineWidth = 1.5
+    private static let dividerWidth = 0.5
+    private static let buildingColor = UIColor(white: 0.25, alpha: 1)
+    private static let selectedColor = UIColor(red: 1, green: 0.62, blue: 0.2, alpha: 1)
     /// Building names join the codes below this camera distance.
     private static let namesVisibleBelowDistance = 450.0
     /// Floor numbers at bridge and tunnel ends appear below this camera distance.
@@ -40,7 +46,8 @@ final class PathAnnotationLayer: UIView {
         init(_ string: NSAttributedString) {
             self.string = string
             let bounds = string.boundingRect(with: CGSize(width: 170, height: 100), options: [.usesLineFragmentOrigin], context: nil)
-            size = CGSize(width: ceil(bounds.width) + 4, height: ceil(bounds.height) + 2)
+            // Room around the text for its shadow.
+            size = CGSize(width: ceil(bounds.width) + 8, height: ceil(bounds.height) + 6)
         }
     }
 
@@ -52,27 +59,46 @@ final class PathAnnotationLayer: UIView {
         let view: UILabel
     }
 
-    /// Lines of one color, drawn in screen space. MapKit dims its own polylines
-    /// wherever a 3D building stands over them on a tilted map (ADR-002).
+    /// Lines of one color on the ground.
     private struct LineSet {
         let shape: CAShapeLayer
         let lines: [[SIMD2<Double>]]
     }
 
+    private let footprints = CAShapeLayer()
+    private let selectedFootprint = CAShapeLayer()
+    /// Every building's rings, wound for a non-zero fill, so outlines that overlap
+    /// (EV3 over EV2) fill as one shape.
+    private var rings: [String: [[SIMD2<Double>]]] = [:]
+    private var allRings: [[SIMD2<Double>]] = []
     private var lineSets: [LineSet] = []
     private var labels: [BuildingLabel] = []
     /// The text each label shows now, so it's only reset when it changes.
     private var shownLabelTexts: [String: NSAttributedString] = [:]
     private var badges: [FloorBadge] = []
     private var doorMarkers: [(door: Door, point: SIMD2<Double>, view: DoorMarkerDot)] = []
+    private let userDot = UserLocationDot()
+    private let pin = UIImageView(image: UIImage(systemName: "mappin", withConfiguration: UIImage.SymbolConfiguration(pointSize: 34, weight: .semibold)))
 
     init(campus: CampusBundle, plane: MapPlane) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
-        // Below everything else, tunnels and bridges over the corridors they join.
-        addLines(campus.corridors, color: .white, plane: plane)
+        backgroundColor = .black
+        for building in campus.buildings {
+            rings[building.code] = building.parts.flatMap { part in
+                PolygonGeometry.wound(outline: part.outline.map(plane.planar), holes: part.holes.map { $0.map(plane.planar) })
+            }
+        }
+        allRings = rings.values.flatMap { $0 }
+        footprints.fillColor = Self.buildingColor.cgColor
+        selectedFootprint.fillColor = Self.selectedColor.cgColor
+        layer.addSublayer(footprints)
+        layer.addSublayer(selectedFootprint)
+        addLines(campus.dividers, color: .black, width: Self.dividerWidth, plane: plane)
+        // Tunnels and bridges over the corridors they join.
+        addLines(campus.corridors, color: .white, width: Self.lineWidth, plane: plane)
         for kind in [Connection.Kind.tunnel, .bridge] {
-            addLines(campus.connections.filter { $0.kind == kind }.flatMap { $0.paths.map(\.points) }, color: kind.color, plane: plane)
+            addLines(campus.connections.filter { $0.kind == kind }.flatMap { $0.paths.map(\.points) }, color: kind.color, width: Self.lineWidth, plane: plane)
         }
         for connection in campus.connections {
             addBadges(for: connection, plane: plane)
@@ -86,6 +112,10 @@ final class PathAnnotationLayer: UIView {
             addSubview(marker)
             doorMarkers.append((door, plane.planar(door.coordinate), marker))
         }
+        pin.tintColor = .systemRed
+        pin.isHidden = true
+        addSubview(userDot)
+        addSubview(pin)
     }
 
     @available(*, unavailable)
@@ -101,16 +131,19 @@ final class PathAnnotationLayer: UIView {
     }
 
     /// Repositions everything for the current camera.
-    func update(projector: PinholeProjector, distance: Double, selection: Place?) {
+    func update(projector: PinholeProjector, plane: MapPlane, distance: Double, selection: Place?, userLocation: CLLocation?) {
         let selectedBuilding: String? = if case .campus(.building(let code)) = selection { code } else { nil }
         let selectedDoor: String? = if case .campus(.door(let id)) = selection { id } else { nil }
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)  // a shape layer would animate between paths
+        defer { CATransaction.commit() }
+        let ground = GroundProjection(projector)
+        footprints.path = Self.filledPath(of: allRings, ground: ground)
+        selectedFootprint.path = selectedBuilding.flatMap { rings[$0] }.map { Self.filledPath(of: $0, ground: ground) }
         for set in lineSets {
-            set.shape.path = Self.path(of: set.lines, projector: projector)
+            set.shape.path = Self.strokedPath(of: set.lines, ground: ground)
         }
-        CATransaction.commit()
 
         // Labels: selected building first, then by importance; drop any that would overlap.
         let showNames = distance < Self.namesVisibleBelowDistance
@@ -191,20 +224,54 @@ final class PathAnnotationLayer: UIView {
             placed.append(frame)
             marker.center = CGPoint(x: screen.x, y: screen.y)
         }
+
+        if let userLocation, let screen = projector.project(plane.point(GeoCoordinate(userLocation.coordinate))) {
+            // Accuracy halo: project a point `accuracy` meters east to get its radius on screen.
+            let east = plane.point(GeoCoordinate(userLocation.coordinate)) + SIMD3(max(userLocation.horizontalAccuracy, 0), 0, 0)
+            let edge = projector.project(east) ?? screen
+            userDot.isHidden = false
+            userDot.update(center: CGPoint(x: screen.x, y: screen.y), haloRadius: hypot(edge.x - screen.x, edge.y - screen.y))
+        } else {
+            userDot.isHidden = true
+        }
+
+        switch selection {
+        case .mapItem(let item):
+            placePin(at: item.coordinate, projector: projector, plane: plane)
+        case .droppedPin(let coordinate):
+            placePin(at: coordinate, projector: projector, plane: plane)
+        default:
+            pin.isHidden = true
+        }
     }
 
-    private static func path(of lines: [[SIMD2<Double>]], projector: PinholeProjector) -> CGPath {
+    private func placePin(at coordinate: GeoCoordinate, projector: PinholeProjector, plane: MapPlane) {
+        guard let screen = projector.project(plane.point(coordinate)) else {
+            pin.isHidden = true
+            return
+        }
+        pin.isHidden = false
+        pin.sizeToFit()
+        // The symbol's tip, not its middle, marks the spot.
+        pin.center = CGPoint(x: screen.x, y: screen.y - pin.bounds.height / 2)
+    }
+
+    private static func filledPath(of rings: [[SIMD2<Double>]], ground: GroundProjection) -> CGPath {
+        let path = CGMutablePath()
+        for ring in rings {
+            let points = ground.project(ring: ring)
+            guard points.count >= 3 else { continue }
+            path.addLines(between: points.map { CGPoint(x: $0.x, y: $0.y) })
+            path.closeSubpath()
+        }
+        return path
+    }
+
+    private static func strokedPath(of lines: [[SIMD2<Double>]], ground: GroundProjection) -> CGPath {
         let path = CGMutablePath()
         for line in lines {
-            var isDrawing = false
-            for point in line {
-                guard let screen = projector.project(SIMD3(point.x, point.y, 0)) else {
-                    isDrawing = false  // behind the camera
-                    continue
-                }
-                let target = CGPoint(x: screen.x, y: screen.y)
-                if isDrawing { path.addLine(to: target) } else { path.move(to: target) }
-                isDrawing = true
+            for piece in ground.project(line: line) {
+                path.addLines(between: piece.map { CGPoint(x: $0.x, y: $0.y) })
             }
         }
         return path
@@ -212,11 +279,11 @@ final class PathAnnotationLayer: UIView {
 
     // MARK: Building
 
-    private func addLines(_ lines: [[GeoCoordinate]], color: UIColor, plane: MapPlane) {
+    private func addLines(_ lines: [[GeoCoordinate]], color: UIColor, width: CGFloat, plane: MapPlane) {
         let shape = CAShapeLayer()
         shape.strokeColor = color.cgColor
         shape.fillColor = nil
-        shape.lineWidth = Self.lineWidth
+        shape.lineWidth = width
         shape.lineCap = .round
         shape.lineJoin = .round
         layer.addSublayer(shape)
@@ -234,10 +301,6 @@ final class PathAnnotationLayer: UIView {
         let view = UILabel()
         view.numberOfLines = 0
         view.textAlignment = .center
-        view.layer.shadowColor = UIColor.black.cgColor
-        view.layer.shadowOpacity = 0.9
-        view.layer.shadowRadius = 3
-        view.layer.shadowOffset = .zero
         view.isHidden = true
         view.accessibilityIdentifier = "pathLabel-\(building.code)"
         addSubview(view)
@@ -252,14 +315,22 @@ final class PathAnnotationLayer: UIView {
     }
 
     private static func labelText(code: String, details: String?) -> NSAttributedString {
+        // The shadow is part of the text, not the layer: a layer shadow on every label
+        // is an offscreen render pass each, every frame the map moves.
+        let shadow = NSShadow()
+        shadow.shadowColor = UIColor.black.withAlphaComponent(0.9)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = .zero
         let text = NSMutableAttributedString(string: code, attributes: [
             .font: UIFont.systemFont(ofSize: 15, weight: .heavy),
             .foregroundColor: UIColor.white,
+            .shadow: shadow,
         ])
         if let details {
             text.append(NSAttributedString(string: "\n\(details)", attributes: [
                 .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
                 .foregroundColor: UIColor(white: 0.85, alpha: 1),
+                .shadow: shadow,
             ]))
         }
         return text
@@ -284,11 +355,11 @@ final class PathAnnotationLayer: UIView {
         view.font = .systemFont(ofSize: 11, weight: .bold)
         view.textColor = .white
         view.textAlignment = .center
-        view.backgroundColor = connection.kind.color
+        // On the layer with no clipping, which would be an offscreen render pass per badge.
+        view.layer.backgroundColor = connection.kind.color.cgColor
         view.layer.cornerRadius = 8
         view.layer.borderColor = UIColor.white.withAlphaComponent(0.85).cgColor
         view.layer.borderWidth = 1
-        view.clipsToBounds = true
         view.sizeToFit()
         view.bounds.size = CGSize(width: max(16, view.bounds.width + 8), height: 16)
         view.isHidden = true
@@ -326,6 +397,36 @@ private final class DoorMarkerDot: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+}
+
+/// Apple Maps' blue dot, with a translucent halo for horizontal accuracy.
+private final class UserLocationDot: UIView {
+    private let halo = UIView()
+    private let dot = UIView(frame: CGRect(x: 0, y: 0, width: 18, height: 18))
+
+    init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        isHidden = true
+        halo.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.15)
+        dot.backgroundColor = .systemBlue
+        dot.layer.cornerRadius = 9
+        dot.layer.borderColor = UIColor.white.cgColor
+        dot.layer.borderWidth = 3
+        addSubview(halo)
+        addSubview(dot)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func update(center: CGPoint, haloRadius: CGFloat) {
+        let radius = max(haloRadius, 12)
+        frame = CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+        halo.frame = bounds
+        halo.layer.cornerRadius = radius
+        dot.center = CGPoint(x: radius, y: radius)
+    }
 }
 
 extension Connection.Kind {

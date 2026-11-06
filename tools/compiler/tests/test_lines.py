@@ -1,4 +1,5 @@
-from lines import attach_lines
+from arms import LocalFrame
+from lines import attach_lines, check_corridors_inside
 
 
 def line(kind, points=((0, 0), (1, 1)), **properties):
@@ -65,3 +66,30 @@ def test_bad_lines_are_errors():
     assert "is a bridge, not a tunnel" in messages[4]
     assert "doesn't reach DC" in messages[5]
     assert bridge["paths"] == []
+
+
+FRAME = LocalFrame({"latitude": 43.47, "longitude": -80.54})
+
+
+def square(x0, x1):
+    ring = [FRAME.to_lonlat(p) for p in [(x0, 0), (x1, 0), (x1, 40), (x0, 40), (x0, 0)]]
+    return {"parts": [{"outline": ring, "holes": []}]}
+
+
+def corridor(*points):
+    return [FRAME.to_lonlat(p) for p in points]
+
+
+def test_a_corridor_inside_buildings_passes_even_across_touching_ones():
+    check_corridors_inside([corridor((5, 20), (75, 20))], [square(0, 40), square(40, 80)], FRAME, issues := [])
+    assert issues == []
+
+
+def test_a_corridor_that_leaves_the_buildings_is_an_error():
+    check_corridors_inside([corridor((5, 20), (55, 20))], [square(0, 40)], FRAME, issues := [])
+    assert any("runs 15.0 m outside" in m for m in errors(issues))
+
+
+def test_a_corridor_may_touch_a_wall():
+    check_corridors_inside([corridor((5, 20), (40.2, 20))], [square(0, 40)], FRAME, issues := [])
+    assert issues == []

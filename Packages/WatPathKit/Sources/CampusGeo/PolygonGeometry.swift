@@ -88,6 +88,15 @@ public enum PolygonGeometry {
         return best
     }
 
+    /// `outline` counter-clockwise and `holes` clockwise, so a non-zero fill leaves the
+    /// holes empty while shapes that overlap each other fill solidly.
+    public static func wound(outline: [SIMD2<Double>], holes: [[SIMD2<Double>]]) -> [[SIMD2<Double>]] {
+        func signedArea(_ ring: [SIMD2<Double>]) -> Double {
+            zip(ring, ring.dropFirst() + ring.prefix(1)).reduce(0) { $0 + $1.0.x * $1.1.y - $1.1.x * $1.0.y }
+        }
+        return [signedArea(outline) >= 0 ? outline : outline.reversed()] + holes.map { signedArea($0) <= 0 ? $0 : $0.reversed() }
+    }
+
     private static func closestPoint(onSegment a: SIMD2<Double>, _ b: SIMD2<Double>, to p: SIMD2<Double>) -> SIMD2<Double> {
         let ab = b - a
         let lengthSquared = (ab * ab).sum()

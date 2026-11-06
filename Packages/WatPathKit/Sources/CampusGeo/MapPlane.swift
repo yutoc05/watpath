@@ -4,7 +4,7 @@ import Foundation
 /// WGS84 angles), centered on `origin` and scaled to meters there.
 ///
 /// Everything rendered over MapKit must live in this plane, not in true local
-/// meters. Spike S1 measured MapKit's map as 0.355% taller north–south than true
+/// meters. We measured MapKit's map as 0.355% taller north–south than true
 /// ground (exactly Web Mercator's distortion at 43.5°N), which would misplace
 /// geometry by ~2 m at the edge of campus (docs/adr/001-camera-architecture.md).
 public struct MapPlane: Sendable {

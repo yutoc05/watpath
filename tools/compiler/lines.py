@@ -3,14 +3,20 @@ bridges and tunnels, drawn by hand from mapped routes. Where a route isn't known
 there is no line, so a connection may have none.
 
 Each feature says what it is. A bridge or tunnel also names its connection and the
-building at each end, which is where the floor numbers go; a corridor is just a line.
+building at each end, which is where the floor numbers go; a corridor is just a line,
+and it stays inside buildings.
 """
 
 from __future__ import annotations
 
+from arms import LocalFrame, outline
 from issues import Issue
+from shapely.geometry import LineString
+from shapely.ops import unary_union
 
 KINDS = {"corridor", "bridge", "tunnel"}
+# A corridor may leave a building by this much, in meters: outlines aren't exact.
+OUTSIDE_TOLERANCE = 0.3
 
 
 def attach_lines(connections: list[dict], features: list[dict], issues: list[Issue]) -> list[list]:
@@ -50,3 +56,14 @@ def attach_lines(connections: list[dict], features: list[dict], issues: list[Iss
         start, finish = (ends.index(code) if code is not None else None for code in (properties.get("from"), properties.get("to")))
         connection["paths"].append({"points": points, "from": start, "to": finish})
     return corridors
+
+
+def check_corridors_inside(corridors: list[list], buildings: list[dict], frame: LocalFrame, issues: list[Issue]) -> None:
+    """A corridor outside every building is a mistake: only bridges and tunnels are."""
+    inside = unary_union([outline(b, frame) for b in buildings])
+    for corridor in corridors:
+        outside = LineString([frame.to_meters(p) for p in corridor]).difference(inside)
+        for piece in getattr(outside, "geoms", [outside]):
+            if piece.length > OUTSIDE_TOLERANCE:
+                east, north = piece.coords[0]
+                issues.append(Issue("error", f"lines.geojson: a corridor runs {piece.length:.1f} m outside the buildings at {frame.to_lonlat((east, north))}"))

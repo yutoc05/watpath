@@ -2,11 +2,12 @@ import CampusGeo
 import Foundation
 
 /// The compiled map data the app ships with (build/CampusBundle, produced by
-/// tools/compiler). Schema v8: Tier 0 building shells with every floor they have,
-/// the Path Map's lines (corridors, and each bridge's and tunnel's own), doors,
-/// building-to-building connections with the floor at each end, and Popular places.
+/// tools/compiler). Schema v9: Tier 0 building shells with every floor they have,
+/// the Path Map's lines (corridors, each bridge's and tunnel's own, and the dividers
+/// between buildings that touch), doors, building-to-building connections with the
+/// floor at each end, and Popular places.
 public struct CampusBundle: Sendable, Decodable {
-    public static let supportedSchemaVersion = 8
+    public static let supportedSchemaVersion = 9
 
     public var schemaVersion: Int
     public var origin: GeoCoordinate
@@ -14,12 +15,14 @@ public struct CampusBundle: Sendable, Decodable {
     public var buildings: [Building]
     /// The white lines on the Path Map: hallways, all on one flat level.
     public var corridors: [[GeoCoordinate]]
+    /// Hairlines where two buildings touch, so they don't merge into one shape.
+    public var dividers: [[GeoCoordinate]]
     public var doors: [Door]
     public var connections: [Connection]
     public var popular: [PlaceReference]
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, origin, attribution, buildings, corridors, doors, connections, popular
+        case schemaVersion, origin, attribution, buildings, corridors, dividers, doors, connections, popular
     }
 
     public init(from decoder: Decoder) throws {
@@ -34,6 +37,9 @@ public struct CampusBundle: Sendable, Decodable {
         buildings = try container.decode([Building].self, forKey: .buildings)
         corridors = try container.decode([[[Double]]].self, forKey: .corridors).map {
             try GeoCoordinate.ring($0, at: [CodingKeys.corridors])
+        }
+        dividers = try container.decode([[[Double]]].self, forKey: .dividers).map {
+            try GeoCoordinate.ring($0, at: [CodingKeys.dividers])
         }
         doors = try container.decode([Door].self, forKey: .doors)
         connections = try container.decode([Connection].self, forKey: .connections)
@@ -106,7 +112,7 @@ public struct Building: Sendable, Decodable, Identifiable {
     public var name: String
     public var aliases: [String]
     public var group: Group
-    /// Tier 2 fill-in order, 1 (first) to 6.
+    /// Which label wins where labels collide, 1 (first) to 6.
     public var priority: Int
     /// True when no source gave a level count and the compiler guessed.
     public var levelsEstimated: Bool
