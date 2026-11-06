@@ -2,19 +2,43 @@ import CampusGeo
 import Foundation
 
 /// The compiled map data the app ships with (build/CampusBundle, produced by
-/// tools/compiler). Schema v5: Tier 0 building shells with every floor they have,
-/// which of those the Path Map shows and their corridors, doors,
+/// tools/compiler). Schema v8: Tier 0 building shells with every floor they have,
+/// the Path Map's lines (corridors, and each bridge's and tunnel's own), doors,
 /// building-to-building connections with the floor at each end, and Popular places.
 public struct CampusBundle: Sendable, Decodable {
-    public static let supportedSchemaVersion = 5
+    public static let supportedSchemaVersion = 8
 
     public var schemaVersion: Int
     public var origin: GeoCoordinate
     public var attribution: String
     public var buildings: [Building]
+    /// The white lines on the Path Map: hallways, all on one flat level.
+    public var corridors: [[GeoCoordinate]]
     public var doors: [Door]
     public var connections: [Connection]
     public var popular: [PlaceReference]
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, origin, attribution, buildings, corridors, doors, connections, popular
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        // A newer or older bundle may not even parse, so report the schema first.
+        guard schemaVersion == Self.supportedSchemaVersion else {
+            throw LoadError.unsupportedSchema(schemaVersion)
+        }
+        origin = try container.decode(GeoCoordinate.self, forKey: .origin)
+        attribution = try container.decode(String.self, forKey: .attribution)
+        buildings = try container.decode([Building].self, forKey: .buildings)
+        corridors = try container.decode([[[Double]]].self, forKey: .corridors).map {
+            try GeoCoordinate.ring($0, at: [CodingKeys.corridors])
+        }
+        doors = try container.decode([Door].self, forKey: .doors)
+        connections = try container.decode([Connection].self, forKey: .connections)
+        popular = try container.decode([PlaceReference].self, forKey: .popular)
+    }
 
     public enum LoadError: Error, Equatable {
         case unsupportedSchema(Int)
@@ -26,11 +50,7 @@ public struct CampusBundle: Sendable, Decodable {
     }
 
     public static func decode(_ data: Data) throws -> CampusBundle {
-        let bundle = try JSONDecoder().decode(CampusBundle.self, from: data)
-        guard bundle.schemaVersion == supportedSchemaVersion else {
-            throw LoadError.unsupportedSchema(bundle.schemaVersion)
-        }
-        return bundle
+        try JSONDecoder().decode(CampusBundle.self, from: data)
     }
 
     public func building(code: String) -> Building? {
@@ -43,16 +63,6 @@ public struct CampusBundle: Sendable, Decodable {
 
     public func doors(of building: Building) -> [Door] {
         doors.filter { $0.building == building.code }
-    }
-
-    /// Height of a connection's walking surface where it meets `end`, on `deck`
-    /// (0 for the lowest floor of a multi-storey bridge). Ends without known floors
-    /// meet the building at ground level.
-    public func elevation(of connection: Connection, end: Int, deck: Int) -> Double {
-        let end = connection.ends[end]
-        guard let building = building(code: end.building) else { return 0 }
-        let name = end.floors.isEmpty ? nil : end.floors[min(deck, end.floors.count - 1)]
-        return (name.flatMap(building.floor(named:)) ?? building.groundFloor)?.elevation ?? 0
     }
 }
 
@@ -98,15 +108,11 @@ public struct Building: Sendable, Decodable, Identifiable {
     public var group: Group
     /// Tier 2 fill-in order, 1 (first) to 6.
     public var priority: Int
-    /// Floor-to-floor height in meters.
-    public var levelHeight: Double
     /// True when no source gave a level count and the compiler guessed.
     public var levelsEstimated: Bool
     /// Every floor the building has, bottom to top. Never empty.
     public var floors: [Floor]
     public var parts: [BuildingPart]
-    /// The Path Map floor shown until the user picks another, if it shows any.
-    public var defaultFloorIndex: Int?
     /// Where the Path Map puts the building's label, when the data places it by
     /// hand; otherwise the app picks the widest point inside.
     public var label: GeoCoordinate?
@@ -114,7 +120,7 @@ public struct Building: Sendable, Decodable, Identifiable {
     public var id: String { code }
 
     private enum CodingKeys: String, CodingKey {
-        case code, name, aliases, group, priority, levelHeight, levelsEstimated, floors, parts, label, defaultFloor
+        case code, name, aliases, group, priority, levelsEstimated, floors, parts, label
     }
 
     public init(from decoder: Decoder) throws {
@@ -124,25 +130,12 @@ public struct Building: Sendable, Decodable, Identifiable {
         aliases = try container.decode([String].self, forKey: .aliases)
         group = try container.decode(Group.self, forKey: .group)
         priority = try container.decode(Int.self, forKey: .priority)
-        levelHeight = try container.decode(Double.self, forKey: .levelHeight)
         levelsEstimated = try container.decode(Bool.self, forKey: .levelsEstimated)
         floors = try container.decode([Floor].self, forKey: .floors)
         parts = try container.decode([BuildingPart].self, forKey: .parts)
         label = try container.decodeIfPresent([Double].self, forKey: .label).map {
             try GeoCoordinate.point($0, at: [CodingKeys.label])
         }
-        let defaultFloor = try container.decodeIfPresent(String.self, forKey: .defaultFloor)
-        defaultFloorIndex = floors.firstIndex { $0.name == defaultFloor }
-    }
-
-    /// The floors the Path Map can show: only those a bridge, tunnel or link meets.
-    public var mappedFloorIndices: [Int] { floors.indices.filter { floors[$0].isMapped } }
-
-    /// Floor 1, or the lowest floor if there's no floor 1: where doors usually are.
-    public var groundFloor: Floor? { floor(named: "1") ?? floors.first }
-
-    public func floor(named name: String) -> Floor? {
-        floors.first { $0.name == name }
     }
 
     /// Every floor, with runs of numbered floors shortened: "Basement, 1–6, Penthouse".
@@ -168,75 +161,31 @@ public struct Building: Sendable, Decodable, Identifiable {
     }
 }
 
-/// The hallways on one floor, merged into one walkable area.
-public struct Corridor: Sendable, Decodable, Equatable {
-    /// The floor area, as triangles of three points.
-    public var triangles: [[GeoCoordinate]]
-    /// Wall lines along its sides; open where a hallway ends at a door, stairs or bridge.
-    public var walls: [[GeoCoordinate]]
-
-    public init(triangles: [[GeoCoordinate]], walls: [[GeoCoordinate]]) {
-        self.triangles = triangles
-        self.walls = walls
-    }
-
-    private enum CodingKeys: String, CodingKey { case triangles, walls }
-
-    public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        triangles = try container.decode([[[Double]]].self, forKey: .triangles).map { try GeoCoordinate.ring($0, at: [CodingKeys.triangles]) }
-        walls = try container.decode([[[Double]]].self, forKey: .walls).map { try GeoCoordinate.ring($0, at: [CodingKeys.walls]) }
-        guard triangles.allSatisfy({ $0.count == 3 }) else {
-            throw DecodingError.dataCorrupted(.init(codingPath: [CodingKeys.triangles], debugDescription: "Triangles need three points"))
-        }
-    }
-}
-
 /// One storey of a building.
 public struct Floor: Sendable, Decodable, Equatable {
-    /// Short, as on the floor picker: "1", "B" (basement), "2M" (2nd-floor mezzanine), "P" (penthouse).
+    /// Short: "1", "B" (basement), "2M" (2nd-floor mezzanine), "P" (penthouse).
     public var name: String
     /// In full: "Floor 1", "Basement", "2nd floor mezzanine", "Penthouse".
     public var title: String
-    /// Height of the floor surface above the campus ground plane, in meters.
-    /// Solved from the floors bridges and tunnels meet, so they line up across buildings.
-    public var elevation: Double
-    /// Shown on the Path Map: a bridge, tunnel or link meets it. Other floors are never drawn.
-    public var isMapped: Bool
-    /// The hallways people walk on this floor, when mapped.
-    public var corridor: Corridor?
 
-    public init(name: String, title: String? = nil, elevation: Double, isMapped: Bool = true, corridor: Corridor? = nil) {
+    public init(name: String, title: String? = nil) {
         self.name = name
         self.title = title ?? name
-        self.elevation = elevation
-        self.isMapped = isMapped
-        self.corridor = corridor
     }
-
-    private enum CodingKeys: String, CodingKey {
-        case name, title, elevation, isMapped = "mapped", corridor
-    }
-
-    /// The basement, a midlevel basement, a lower level or a concourse.
-    public var isBelowGround: Bool { ["B", "MB", "LL", "C"].contains(name) || (Int(name).map { $0 < 1 } ?? false) }
 }
 
 public struct BuildingPart: Sendable, Decodable {
     public var osmId: String
-    /// Floors above ground: a part shows on floors 1…levels (and on basements).
-    public var levels: Int
     public var outline: [GeoCoordinate]
     public var holes: [[GeoCoordinate]]
 
     private enum CodingKeys: String, CodingKey {
-        case osmId, levels, outline, holes
+        case osmId, outline, holes
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         osmId = try container.decode(String.self, forKey: .osmId)
-        levels = try container.decode(Int.self, forKey: .levels)
         outline = try GeoCoordinate.ring(container.decode([[Double]].self, forKey: .outline), at: [CodingKeys.outline])
         holes = try container.decode([[[Double]]].self, forKey: .holes).map {
             try GeoCoordinate.ring($0, at: [CodingKeys.holes])
@@ -300,20 +249,21 @@ public struct Connection: Sendable, Decodable, Identifiable {
         }
     }
 
-    /// A piece of the walkway's center line and the ends it runs between.
+    /// A line the Path Map draws for it, from one building's edge to another's (or a junction).
     public struct Path: Sendable, Decodable {
         public var points: [GeoCoordinate]
-        /// Indexes into `ends`.
-        public var from: Int
-        public var to: Int
+        /// The end (index into `ends`) it starts and finishes at, or nil at a junction,
+        /// like the middle of the ML–AL–EV1 tunnel's T.
+        public var from: Int?
+        public var to: Int?
 
         private enum CodingKeys: String, CodingKey { case points, from, to }
 
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             points = try GeoCoordinate.ring(container.decode([[Double]].self, forKey: .points), at: [CodingKeys.points])
-            from = try container.decode(Int.self, forKey: .from)
-            to = try container.decode(Int.self, forKey: .to)
+            from = try container.decodeIfPresent(Int.self, forKey: .from)
+            to = try container.decodeIfPresent(Int.self, forKey: .to)
         }
     }
 
@@ -326,10 +276,9 @@ public struct Connection: Sendable, Decodable, Identifiable {
     public var verified: Bool
     /// Temporarily unusable (construction, locked).
     public var closed: Bool
+    /// Its lines on the Path Map. Empty when its route isn't mapped: it still exists,
+    /// but nothing is drawn. Links between adjoining buildings have none of their own.
     public var paths: [Path]
-
-    /// Storeys of walkway: 2 for a bridge listed as floors "2,3" at each end.
-    public var deckCount: Int { max(1, ends.map(\.floors.count).max() ?? 1) }
 }
 
 extension GeoCoordinate {

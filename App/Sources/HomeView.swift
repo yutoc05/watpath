@@ -43,18 +43,9 @@ struct HomeView: View {
         }
         .overlay(alignment: .topLeading) {
             if model.activity == .browsing {
-                VStack(alignment: .leading, spacing: 10) {
-                    MapModePicker(mode: $model.mapMode)
-                    // Only when there's a choice: two or more floors with paths.
-                    if model.mapMode == .path, let building = model.focusedBuilding, building.mappedFloorIndices.count > 1 {
-                        FloorPicker(model: model, building: building)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                    }
-                }
-                .padding(.leading, 16)
-                .padding(.top, 74)
-                .animation(.snappy, value: model.mapMode)
-                .animation(.snappy, value: model.focusedBuilding == nil)
+                MapModePicker(mode: $model.mapMode)
+                    .padding(.leading, 16)
+                    .padding(.top, 74)
             }
         }
         .overlay {

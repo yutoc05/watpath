@@ -1,9 +1,7 @@
 import MapKit
 import UIKit
 
-/// Apple Maps-style controls (locate me, 2D/3D, compass) that work above an
-/// overlay. MapKit's built-in buttons live inside the map view, where the Path
-/// Map overlay would cover them (docs/adr/001-camera-architecture.md).
+/// Apple Maps-style controls (locate me, 2D/3D, compass) floating over the map.
 final class MapControlsView: UIView {
     private let mapView: MKMapView
     private let trackingButton: MKUserTrackingButton

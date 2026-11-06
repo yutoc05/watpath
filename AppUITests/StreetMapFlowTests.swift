@@ -76,44 +76,34 @@ final class StreetMapFlowTests: XCTestCase {
     }
 
     @MainActor
-    func testPathModeOffersOnlyTheFloorsBridgesAndTunnelsMeet() {
+    func testPathMapIsFlatButCardsKeepEveryFloor() {
         launch()
         search(for: "mc")
         tapResult(beginningWith: "Mathematics & Computer")
         _ = cardTitle()
         // The card lists every floor MC has...
         XCTAssertTrue(app.staticTexts["Basement, 1–6, Penthouse"].waitForExistence(timeout: 2))
+        saveScreenshot("path-card-street")
         app.segmentedControls.buttons["Path"].tap()
-        let pickerBuilding = app.staticTexts["floorPickerBuilding"]
-        XCTAssertTrue(pickerBuilding.waitForExistence(timeout: 2))
-        XCTAssertEqual(pickerBuilding.label, "MC", "the picker controls the selected building")
-        // ...but the Path Map only shows floor 1 (the C2 tunnel) and floor 3 (the SLC and QNC bridges).
-        XCTAssertTrue(app.buttons["MC floor 3"].isSelected, "MC starts on the floor most connections meet")
-        XCTAssertTrue(app.buttons["MC floor 1"].exists)
-        XCTAssertFalse(app.buttons["MC floor 2"].exists, "floors no connection meets aren't offered")
+        XCTAssertTrue(pathLabel().waitForExistence(timeout: 3))
+        sleep(1)
+        // ...and still does in Path mode, where the map has no floors to pick.
+        XCTAssertTrue(app.staticTexts["Basement, 1–6, Penthouse"].exists)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'MC floor'")).firstMatch.exists, "no floor picker")
+        saveScreenshot("path-selected")
+    }
+
+    @MainActor
+    func testBridgesAndTunnelsShowTheirFloorsAtEachEnd() {
+        launch()
+        showMCInPathMode()
+        // The MC–C2 tunnel: MC floor 1 at one end, C2's basement at the other.
+        let mc = app.staticTexts["floorBadge-conn-w183247348-0"]
+        let c2 = app.staticTexts["floorBadge-conn-w183247348-1"]
+        XCTAssertTrue(mc.waitForExistence(timeout: 2))
+        XCTAssertEqual(mc.label, "MC floor 1")
+        XCTAssertEqual(c2.label, "C2 floor B")
         saveScreenshot("path-mode")
-        app.buttons["MC floor 1"].tap()
-        XCTAssertTrue(app.buttons["MC floor 1"].isSelected)
-        XCTAssertFalse(app.buttons["MC floor 3"].isSelected, "one floor at a time")
-        saveScreenshot("path-mode-mc-floor-1")
-        app.buttons["Close"].tap()
-
-        // With only one floor that has paths there's nothing to pick: QNC's bridges both meet floor 2.
-        search(for: "qnc")
-        tapResult(beginningWith: "Mike & Ophelia Lazaridis Quantum-Nano Centre")
-        _ = cardTitle()
-        XCTAssertFalse(pickerBuilding.waitForExistence(timeout: 1), "QNC has one Path Map floor")
-        app.buttons["Close"].tap()
-
-        // Nor for a building no bridge, tunnel or link reaches.
-        search(for: "dana porter")
-        tapResult(beginningWith: "Dana Porter Library")
-        _ = cardTitle()
-        XCTAssertFalse(pickerBuilding.waitForExistence(timeout: 1), "DP has no Path Map floors")
-        app.buttons["Close"].tap()
-
-        app.segmentedControls.buttons["Street"].tap()
-        XCTAssertFalse(pickerBuilding.waitForExistence(timeout: 1), "floor picker is Path-only")
     }
 
     @MainActor

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Compile map source data (data/) into the bundle the app loads (build/CampusBundle).
 
-Schema v5: building shells (Tier 0) with every floor they have, the height of
-each, which floors the Path Map shows (those a bridge, tunnel or link meets) and
-their corridors, doors, building-to-building connections with the floor at each
-end, and Popular places. Later versions add the routing graph (docs/PLAN.md §5.4).
+Schema v8: building shells (Tier 0) with every floor they have, the Path Map's
+lines (corridors, and each bridge's and tunnel's own), doors, building-to-building
+connections with the floor at each end, and Popular places. Later versions add the
+routing graph (docs/PLAN.md §5.4).
 """
 
 from __future__ import annotations
@@ -17,18 +17,19 @@ import sys
 from pathlib import Path
 
 import connections as connections_module
-import corridors as corridors_module
-from connections import contains as ring_contains
 import floors as floors_module
+import lines as lines_module
+from arms import LocalFrame, remove_bridge_arms
 from doors import apply_overrides, assign_names, attach_photos, base_doors, outline_center
 from issues import Issue
+from shapely.geometry import Point, Polygon
 
 REPO = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = REPO / "build/CampusBundle"
 PHOTOS_DIR = REPO / "data/photos"
 COVERAGE_PATH = REPO / "docs/coverage.md"
 SURVEY_PATH = REPO / "docs/survey.md"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 8
 DEFAULT_LEVELS = 2
 GROUPS = {"core"}
 CODE_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{0,5}$")
@@ -73,7 +74,7 @@ def validate(inventory: list[dict], features: list[dict]) -> list[Issue]:
         if label is not None:
             if not (isinstance(label, list) and len(label) == 2 and all(isinstance(v, (int, float)) for v in label)):
                 issues.append(Issue("error", f"{entry['code']}: label must be [lon, lat]"))
-            elif not any(ring_contains(f["geometry"]["coordinates"][0], label) for f in parts_by_code.get(entry["code"], [])):
+            elif not any(Polygon(f["geometry"]["coordinates"][0]).contains(Point(label)) for f in parts_by_code.get(entry["code"], [])):
                 issues.append(Issue("warning", f"{entry['code']}: label is outside the building"))
         has_levels = entry.get("floors") or entry.get("levels") or any(
             f["properties"]["levels"] for f in parts_by_code.get(entry["code"], [])
@@ -83,7 +84,7 @@ def validate(inventory: list[dict], features: list[dict]) -> list[Issue]:
     return issues
 
 
-def build_buildings(inventory: list[dict], features: list[dict], default_level_height: float) -> list[dict]:
+def build_buildings(inventory: list[dict], features: list[dict]) -> list[dict]:
     buildings = []
     for entry in inventory:
         parts = [f for f in features if f["properties"]["code"] == entry["code"]]
@@ -96,7 +97,6 @@ def build_buildings(inventory: list[dict], features: list[dict], default_level_h
             "aliases": entry.get("aliases", []),
             "group": entry["group"],
             "priority": entry["priority"],
-            "levelHeight": entry.get("levelHeight", default_level_height),
             "levelsEstimated": estimated,
             **({"officialFloors": entry["floors"]} if "floors" in entry else {}),
             **({"label": entry["label"]} if "label" in entry else {}),
@@ -114,40 +114,15 @@ def build_buildings(inventory: list[dict], features: list[dict], default_level_h
 
 
 def assign_floors(buildings: list[dict], connections: list[dict], issues: list[Issue]) -> None:
-    """Gives each building its floors, bottom to top: name, full title, height in
-    meters, and whether the Path Map shows it. Only floors a bridge, tunnel or link
-    meets are shown; a building starts on the one most of them meet."""
+    """Gives each building its floors, bottom to top, by short name and full title."""
     referenced: dict[str, set[str]] = {}
-    meetings: dict[tuple[str, str], int] = {}
     for connection in connections:
         for end in connection["ends"]:
             referenced.setdefault(end["building"], set()).update(end["floors"])
-            for name in end["floors"]:
-                meetings[(end["building"], name)] = meetings.get((end["building"], name), 0) + 1
     for b in buildings:
-        above_ground = max(p["levels"] for p in b["parts"])
-        b["floorNames"] = floors_module.floor_names(
-            above_ground, referenced.get(b["code"], set()), b["code"], issues, b.pop("officialFloors", None)
-        )
-    if any(issue.severity == "error" for issue in issues):
-        return
-    ground = floors_module.solve_ground_elevations(buildings, connections, issues)
-    for b in buildings:
-        names = b.pop("floorNames")
-        top = max([int(n) for n in names if n.isdigit()], default=1)
-        b["floors"] = [
-            {
-                "name": name,
-                "title": floors_module.title(name),
-                "elevation": round(ground[b["code"]] + (floors_module.ordinal(name, top) - 1) * b["levelHeight"], 2),
-                "mapped": name in referenced.get(b["code"], set()),
-            }
-            for name in names
-        ]
-        mapped = [f["name"] for f in b["floors"] if f["mapped"]]
-        if mapped:
-            # Most connections first; on a tie, the lower floor (mapped is bottom to top).
-            b["defaultFloor"] = max(mapped, key=lambda name: (meetings[(b["code"], name)], -mapped.index(name)))
+        above_ground = max(p.pop("levels") for p in b["parts"])
+        names = floors_module.floor_names(above_ground, referenced.get(b["code"], set()), b["code"], issues, b.pop("officialFloors", None))
+        b["floors"] = [{"name": name, "title": floors_module.title(name)} for name in names]
 
 
 def floor_summary(building: dict) -> str:
@@ -190,10 +165,10 @@ def coverage_report(buildings: list[dict], doors: list[dict], connections: list[
         "<!-- Generated by tools/compiler/compile.py. Do not edit. -->",
         "# Map coverage",
         "",
-        "Tier 0 = shell, 1 = doors and connections verified, 2 = corridors, 3 = detail, 4 = photos and rooms.",
+        "Tier 0 = shell, 1 = doors and connections verified, 3 = detail, 4 = photos and rooms.",
         "",
-        "| Priority | Code | Name | Group | Tier | Floors | Path Map floors | Doors (verified) | Connections (verified) | Photos |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| Priority | Code | Name | Group | Tier | Floors | Doors (verified) | Connections (verified) | Photos |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for b in sorted(buildings, key=lambda b: (b["priority"], b["code"])):
         own = [d for d in doors if d["building"] == b["code"]]
@@ -203,11 +178,13 @@ def coverage_report(buildings: list[dict], doors: list[dict], connections: list[
         tier = 1 if own and verified == len(own) and links_verified == len(links) else 0
         level_text = f"{floor_summary(b)} (estimated)" if b["levelsEstimated"] else floor_summary(b)
         photos = sum(len(d["photos"]) for d in own)
-        map_floors = ", ".join(f["name"] + ("" if "corridor" in f else " (no corridor)") for f in b["floors"] if f["mapped"]) or "–"
         rows.append(
-            f"| {b['priority']} | {b['code']} | {b['name']} | {b['group']} | {tier} | {level_text} | {map_floors} "
+            f"| {b['priority']} | {b['code']} | {b['name']} | {b['group']} | {tier} | {level_text} "
             f"| {len(own)} ({verified}) | {len(links)} ({links_verified}) | {photos} |"
         )
+    undrawn = [c for c in connections if c["kind"] != "link" and not c["paths"]]
+    rows += ["", "## Bridges and tunnels with no line", "", "Known, but not drawn on the Path Map, because their route isn't mapped.", ""]
+    rows += [f"- `{c['id']}`: {c['name']}" for c in undrawn] or ["None."]
     return "\n".join(rows) + "\n"
 
 
@@ -259,11 +236,11 @@ def main() -> int:
     connection_features = load_json(REPO / "data/osm/connections.geojson")["features"]
     connection_overrides = load_json(REPO / "data/campus/connections.json")
     popular = load_json(REPO / "data/campus/popular.json")["places"]
-    corridors = load_json(REPO / "data/campus/corridors.geojson")["features"]
+    lines = load_json(REPO / "data/campus/lines.geojson")["features"]
 
     issues = validate(inventory, features)
     codes = {entry["code"] for entry in inventory}
-    buildings = build_buildings(inventory, features, campus["defaultLevelHeight"])
+    buildings = build_buildings(inventory, features)
     doors = apply_overrides(base_doors(entrances), door_overrides, codes, issues)
     assign_names(doors, {b["code"]: outline_center(b["parts"][0]["outline"]) for b in buildings})
     photo_copies = attach_photos(doors, PHOTOS_DIR, issues)
@@ -271,18 +248,15 @@ def main() -> int:
     connections = connections_module.apply_overrides(
         connections_module.base_connections(connection_features), connection_overrides, codes, issues
     )
-    connections_module.attach_paths(connections, {
-        b["code"]: [ring for part in b["parts"] for ring in [part["outline"]]] for b in buildings
-    })
+    corridors = lines_module.attach_lines(connections, lines, issues)
     assign_floors(buildings, connections, issues)
-    if not any(issue.severity == "error" for issue in issues):
-        corridors_module.add_corridors(buildings, corridors, corridors_module.LocalFrame(campus["origin"]), issues)
 
     for issue in issues:
         print(f"{issue.severity}: {issue.message}", file=sys.stderr if issue.severity == "error" else sys.stdout)
     if any(issue.severity == "error" for issue in issues):
         return 1
 
+    remove_bridge_arms(buildings, connections, LocalFrame(campus["origin"]))
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     OUTPUT_DIR.mkdir(parents=True)
     bundle = {
@@ -290,6 +264,7 @@ def main() -> int:
         "origin": campus["origin"],
         "attribution": "© OpenStreetMap contributors",
         "buildings": buildings,
+        "corridors": corridors,
         "doors": doors,
         "connections": connections,
         "popular": popular_places,

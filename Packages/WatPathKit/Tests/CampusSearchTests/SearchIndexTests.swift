@@ -21,8 +21,8 @@ struct SearchIndexTests {
         let buildingJSON = buildings.map { code, name, aliases in
             let aliasList = aliases.map { "\"\($0)\"" }.joined(separator: ",")
             return """
-            {"code":"\(code)","name":"\(name)","aliases":[\(aliasList)],"group":"core","priority":1,"levelHeight":4,
-             "levelsEstimated":false,"floors":[{"name":"1","title":"Floor 1","elevation":0,"mapped":false}],"parts":[{"osmId":"way/1","levels":3,"outline":\(ring),"holes":[]}]}
+            {"code":"\(code)","name":"\(name)","aliases":[\(aliasList)],"group":"core","priority":1,
+             "levelsEstimated":false,"floors":[{"name":"1","title":"Floor 1"}],"parts":[{"osmId":"way/1","outline":\(ring),"holes":[]}]}
             """
         }
         let doorJSON = """
@@ -30,8 +30,8 @@ struct SearchIndexTests {
          "level":null,"accessible":null,"verified":false,"photos":[]}
         """
         let json = """
-        {"schemaVersion":5,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"",
-         "buildings":[\(buildingJSON.joined(separator: ","))],"doors":[\(doorJSON)],"connections":[],"popular":[]}
+        {"schemaVersion":8,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"",
+         "buildings":[\(buildingJSON.joined(separator: ","))],"corridors":[],"doors":[\(doorJSON)],"connections":[],"popular":[]}
         """
         return try! CampusBundle.decode(Data(json.utf8))
     }()

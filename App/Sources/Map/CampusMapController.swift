@@ -4,23 +4,22 @@ import MapKit
 import UIKit
 import os
 
-/// The campus map in both modes. MapKit owns gestures and the camera; in Path mode
-/// a RealityKit view and a 2D annotation layer cover it, re-rendered from MapKit's
-/// camera every frame, so switching modes never moves the camera (ADR-001).
+/// The campus map in both modes. MapKit owns gestures and the camera, so switching
+/// modes never moves it. Path mode draws its ground on the map itself, with lines and
+/// labels floating above it, re-placed from MapKit's camera every frame (ADR-002).
 ///
 /// It reports user actions through closures and takes app state through `apply…`;
 /// it never owns app state itself.
 final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerDelegate {
     /// Doors appear once the camera is closer than this; above it they'd clutter the map.
-    static let doorsVisibleBelowDistance = PathAnnotationLayer.doorsVisibleBelowDistance
+    private static let doorsVisibleBelowDistance = PathAnnotationLayer.doorsVisibleBelowDistance
+    /// How long Street and Path take to cross-fade.
+    private static let fadeSeconds = 0.25
     /// Search field plus padding at the top of the map.
     private static let searchFieldClearance = 66.0
     private static let logger = Logger(subsystem: "ca.yutochau.watpath", category: "map")
     /// How far inside a building "choose location inside the path" puts the pin.
     private static let snapInset = 3.0
-    /// The floor picker keeps the last building under the map's center while the
-    /// center crosses a gap narrower than this, in meters.
-    private static let focusStickiness = 40.0
 
     let mapView = MKMapView()
     var onSelect: ((Place?) -> Void)?
@@ -28,8 +27,6 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     var onPickerCoordinateChange: ((GeoCoordinate) -> Void)?
     /// Screen point (in this view) where MapKit keeps the camera center.
     var onAnchorChange: ((CGPoint) -> Void)?
-    /// In Path mode: the building under the middle of the map, for the floor picker.
-    var onCenteredBuildingChange: ((String?) -> Void)?
     /// Height of the place card over the bottom of the map; selections are framed above it.
     var cardHeight = 300.0
     var isPicking = false {
@@ -44,13 +41,9 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private let campus: CampusBundle
     private let plane: MapPlane
     private lazy var controls = MapControlsView(mapView: mapView)
-    private let pathScene: PathSceneView
+    private let pathOverlays: PathOverlays
     private let annotationLayer: PathAnnotationLayer
-    private var isPathSceneLoaded = false
     private var mode = AppModel.MapMode.street
-    /// Building code → index of the floor shown in Path mode.
-    private var displayedFloors: [String: Int] = [:]
-    private var centeredBuilding: String?
     private var displayLink: CADisplayLink?
     private let pathPan = UIPanGestureRecognizer()
     /// While panning the Path Map: the map-plane point the finger is holding.
@@ -71,7 +64,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         let plane = MapPlane(origin: campus.origin)
         self.campus = campus
         self.plane = plane
-        pathScene = PathSceneView(plane: plane)
+        pathOverlays = PathOverlays(campus: campus, polygons: Self.polygons(of:))
         annotationLayer = PathAnnotationLayer(campus: campus, plane: plane)
         doorAnnotations = Dictionary(uniqueKeysWithValues: campus.doors.map { ($0.id, DoorAnnotation(door: $0)) })
         outlines = campus.buildings.map { building in
@@ -87,11 +80,9 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         mapView.camera = MKMapCamera(lookingAtCenter: Self.campusCenter(campus).clCoordinate, fromDistance: 2_400, pitch: 0, heading: 0)
         addSubview(mapView)
 
-        for overlay in [pathScene, annotationLayer] as [UIView] {
-            overlay.alpha = 0
-            overlay.isHidden = true
-            addSubview(overlay)
-        }
+        annotationLayer.alpha = 0
+        annotationLayer.isHidden = true
+        addSubview(annotationLayer)
 
         controls.translatesAutoresizingMaskIntoConstraints = false
         addSubview(controls)
@@ -123,7 +114,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        for view in [mapView, pathScene, annotationLayer] as [UIView] { view.frame = bounds }
+        for view in [mapView, annotationLayer] as [UIView] { view.frame = bounds }
         reportAnchor()
         syncPathMap()
     }
@@ -150,35 +141,43 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         mode = newMode
         mapView.isScrollEnabled = mode == .street
         pathPan.isEnabled = mode == .path
-        if mode == .path, !isPathSceneLoaded {
-            // Built on first use, so Street Map launches without paying for it (~0.1 s).
-            do {
-                pathScene.load(try CampusSceneBuilder(plane: plane).build(campus))
-            } catch {
-                Self.logger.error("Couldn't build the Path Map: \(error.localizedDescription, privacy: .public)")
+        crossFade(animated: animated) {
+            if mode == .path {
+                pathOverlays.show(on: mapView)
+            } else {
+                pathOverlays.hide()
             }
-            isPathSceneLoaded = true
         }
-        let overlays = [pathScene, annotationLayer] as [UIView]
         if mode == .path {
-            overlays.forEach { $0.isHidden = false }
+            annotationLayer.isHidden = false
             syncPathMap()
-            updateCenteredBuilding()
         }
-        UIView.animate(withDuration: animated ? 0.25 : 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-            overlays.forEach { $0.alpha = newMode == .path ? 1 : 0 }
+        UIView.animate(withDuration: animated ? Self.fadeSeconds : 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.annotationLayer.alpha = newMode == .path ? 1 : 0
         } completion: { _ in
-            if self.mode == .street { overlays.forEach { $0.isHidden = true } }
+            if self.mode == .street { self.annotationLayer.isHidden = true }
         }
         updateDoorVisibility()
+        if mode == .path {
+            mapView.removeAnnotations(Array(doorAnnotations.values))
+        } else {
+            showSelectedDoor()
+        }
         if isPicking { snapPickerIntoPathIfNeeded() }
     }
 
-    func apply(displayedFloors floors: [String: Int]) {
-        guard floors != displayedFloors else { return }
-        displayedFloors = floors
-        pathScene.setDisplayedFloors(floors)
-        syncPathMap()
+    /// Makes `change` to the map under a snapshot of how it looks now, then fades the
+    /// snapshot away, since MapKit can't animate adding and removing overlays.
+    private func crossFade(animated: Bool, change: () -> Void) {
+        guard animated, let snapshot = mapView.snapshotView(afterScreenUpdates: false) else { return change() }
+        snapshot.isUserInteractionEnabled = false
+        insertSubview(snapshot, aboveSubview: mapView)
+        change()
+        UIView.animate(withDuration: Self.fadeSeconds, delay: 0, options: [.allowUserInteraction]) {
+            snapshot.alpha = 0
+        } completion: { _ in
+            snapshot.removeFromSuperview()
+        }
     }
 
     func apply(selection: Place?) {
@@ -187,26 +186,24 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         isApplyingSelection = true
         defer { isApplyingSelection = false }
 
-        if let highlight { mapView.removeOverlay(highlight) }
+        clearHighlight()
         if let pin { mapView.removeAnnotation(pin) }
-        highlight = nil
         pin = nil
         for annotation in mapView.selectedAnnotations {
             mapView.deselectAnnotation(annotation, animated: true)
+            if !doorsShown, annotation is DoorAnnotation { mapView.removeAnnotation(annotation) }
         }
         var highlightedBuilding: String?
 
         switch selection {
         case .campus(.building(let code)):
             guard let building = campus.building(code: code) else { break }
-            let overlay = MKMultiPolygon(building.parts.map(Self.polygon))
+            let overlay = Self.polygons(of: building)
             mapView.addOverlay(overlay, level: .aboveRoads)
             highlight = overlay
             highlightedBuilding = code
-        case .campus(.door(let id)):
-            guard let annotation = doorAnnotations[id] else { break }
-            if !doorsShown { mapView.addAnnotation(annotation) }
-            mapView.selectAnnotation(annotation, animated: true)
+        case .campus(.door):
+            showSelectedDoor()
         case .mapItem(let item):
             dropPin(at: item.coordinate, title: item.name)
         case .droppedPin(let coordinate):
@@ -214,7 +211,13 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         case nil:
             break
         }
-        pathScene.setHighlightedBuilding(highlightedBuilding)
+        pathOverlays.select(highlightedBuilding.flatMap(campus.building(code:)))
+    }
+
+    private func clearHighlight() {
+        if let highlight { mapView.removeOverlay(highlight) }
+        highlight = nil
+        pathOverlays.select(nil)
     }
 
     func apply(cameraRequest: AppModel.CameraRequest?) {
@@ -235,59 +238,15 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         syncPathMap()
     }
 
-    /// Re-renders the Path Map overlays from MapKit's current camera.
+    /// Re-places the lines and labels from MapKit's current camera.
     private func syncPathMap() {
-        guard !pathScene.isHidden, bounds.height > 0 else { return }
+        guard !annotationLayer.isHidden, bounds.height > 0 else { return }
         let state = MapCameraState(mapView.camera)
-        pathScene.sync(to: state, anchor: cameraAnchor)
-        annotationLayer.update(
-            projector: projector(for: state),
-            plane: plane,
-            distance: state.distance,
-            displayedFloors: displayedFloors,
-            selection: appliedSelection,
-            userLocation: mapView.userLocation.location
-        )
+        annotationLayer.update(projector: projector(for: state), distance: state.distance, selection: appliedSelection)
     }
 
     private func projector(for state: MapCameraState) -> PinholeProjector {
-        PinholeProjector(state: state, plane: plane, model: pathScene.cameraModel, viewportSize: viewportSize, anchor: cameraAnchor)
-    }
-
-    /// Reports the building under the map's center to the floor picker. Crossing a
-    /// narrow gap keeps the last one, so the picker doesn't flicker between buildings.
-    private func updateCenteredBuilding() {
-        guard mode == .path else { return }
-        var code: String?
-        if mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance {
-            let center = plane.planar(GeoCoordinate(mapView.centerCoordinate))
-            code = outlines.first { PolygonGeometry.contains($0.rings, center) }?.code
-            if code == nil, let previous = outlines.first(where: { $0.code == centeredBuilding }),
-               PolygonGeometry.distanceToEdges(previous.rings, center) < Self.focusStickiness {
-                code = previous.code
-            }
-        }
-        guard code != centeredBuilding else { return }
-        centeredBuilding = code
-        Task { @MainActor [weak self] in self?.onCenteredBuildingChange?(code) }
-    }
-
-    /// The building drawn under `point` in Path mode. Each shows one floor at that
-    /// floor's height, so test each at its own height, and prefer the nearest the
-    /// camera where tilted buildings overlap on screen.
-    private func pathBuilding(at point: CGPoint) -> String? {
-        let projector = projector(for: MapCameraState(mapView.camera))
-        var best: (code: String, height: Double)?
-        for (code, rings) in outlines {
-            guard let building = campus.building(code: code) else { continue }
-            let height = displayedFloors[code].map { building.floors[$0].elevation } ?? building.groundFloor?.elevation ?? 0
-            guard let ground = projector.unproject(SIMD2(Double(point.x), Double(point.y)), height: height),
-                  PolygonGeometry.contains(rings, SIMD2(ground.x, ground.y)),
-                  height > best?.height ?? -.infinity
-            else { continue }
-            best = (code, height)
-        }
-        return best?.code
+        PinholeProjector(state: state, plane: plane, model: .measured, viewportSize: viewportSize, anchor: cameraAnchor)
     }
 
     /// "Choose location inside the path": if the pin is out in the black, slide the
@@ -330,7 +289,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         let projector = PinholeProjector(
             state: MapCameraState(center: coordinate, distance: distance, heading: heading, pitch: Double(pitch)),
             plane: plane,
-            model: pathScene.cameraModel,
+            model: .measured,
             viewportSize: viewportSize,
             anchor: cameraAnchor
         )
@@ -370,7 +329,6 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         syncPathMap()  // as soon as MapKit moves, for the least lag behind the finger
         controls.updatePitchButton()
         updateDoorVisibility()
-        updateCenteredBuilding()
         if isPicking {
             onPickerCoordinateChange?(GeoCoordinate(mapView.centerCoordinate))
         }
@@ -395,12 +353,14 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     func mapView(_ mapView: MKMapView, didSelect annotation: any MKAnnotation) {
         guard !isApplyingSelection, let door = annotation as? DoorAnnotation else { return }
+        clearHighlight()
         appliedSelection = .campus(.door(id: door.door.id))
         onSelect?(appliedSelection)
         keepVisible(door.door.coordinate)
     }
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
+        if let renderer = pathOverlays.renderer(for: overlay) { return renderer }
         guard let overlay = overlay as? MKMultiPolygon else { return MKOverlayRenderer(overlay: overlay) }
         let renderer = MKMultiPolygonRenderer(multiPolygon: overlay)
         renderer.fillColor = .tintColor.withAlphaComponent(0.18)
@@ -417,9 +377,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     /// Path mode pans with this instead of MapKit: the ground point under the finger
     /// stays under it, and the map stops dead when the finger lifts. MapKit's own pan
-    /// glides on after a fling (with no public switch to stop it), and the 3D view and
-    /// labels, re-rendered from its camera every frame, judder while it does. Two
-    /// fingers pause it, leaving pinch, rotate and tilt to MapKit.
+    /// glides on after a fling (with no public switch to stop it). Two fingers pause
+    /// it, leaving pinch, rotate and tilt to MapKit.
     @objc private func handlePathPan(_ recognizer: UIPanGestureRecognizer) {
         let point = recognizer.location(in: self)
         switch recognizer.state {
@@ -447,28 +406,22 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
         guard !isPicking else { return }
-        let point = recognizer.location(in: mapView)
-        let code: String?
-        if mode == .path {
-            // Path mode draws its own markers, which never take touches (so drags
-            // that start on one still move the map): hit-test them here.
-            if let id = annotationLayer.door(at: recognizer.location(in: annotationLayer)), let door = campus.door(id: id) {
-                appliedSelection = .campus(.door(id: id))
-                onSelect?(appliedSelection)
-                keepVisible(door.coordinate)
-                return
-            }
-            code = pathBuilding(at: point)
-        } else {
-            // Taps on markers (and the location dot) belong to MapKit's own selection.
-            var hit = mapView.hitTest(point, with: nil)
-            while let view = hit {
-                if view is MKAnnotationView { return }
-                hit = view.superview
-            }
-            let tapped = plane.planar(GeoCoordinate(mapView.convert(point, toCoordinateFrom: mapView)))
-            code = outlines.first { PolygonGeometry.contains($0.rings, tapped) }?.code
+        // Path Map doors never take touches (so drags that start on one still move
+        // the map): hit-test them here.
+        if mode == .path, let id = annotationLayer.door(at: recognizer.location(in: annotationLayer)), let door = campus.door(id: id) {
+            onSelect?(.campus(.door(id: id)))
+            keepVisible(door.coordinate)
+            return
         }
+        let point = recognizer.location(in: mapView)
+        // Taps on markers (and the location dot) belong to MapKit's own selection.
+        var hit = mapView.hitTest(point, with: nil)
+        while let view = hit {
+            if view is MKAnnotationView { return }
+            hit = view.superview
+        }
+        let tapped = plane.planar(GeoCoordinate(mapView.convert(point, toCoordinateFrom: mapView)))
+        let code = outlines.first { PolygonGeometry.contains($0.rings, tapped) }?.code
         let selection = code.map { Place.campus(.building(code: $0)) }
         guard selection != appliedSelection else { return }
         onSelect?(selection)
@@ -481,9 +434,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     private static let pinReuseIdentifier = "pin"
 
-    /// MapKit door markers only in Street Map and only zoomed in. In Path Map the
-    /// annotation layer draws doors instead; MapKit's would be invisible but still
-    /// catch taps.
+    /// MapKit's door markers are the Street Map's, and only zoomed in: above that
+    /// they'd clutter the map. The annotation layer draws the Path Map's.
     private func updateDoorVisibility() {
         let shouldShow = mode == .street && mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance
         guard shouldShow != doorsShown else { return }
@@ -495,6 +447,16 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
             let selected = Set(mapView.selectedAnnotations.compactMap { ($0 as? DoorAnnotation)?.door.id })
             mapView.removeAnnotations(doorAnnotations.values.filter { !selected.contains($0.door.id) })
         }
+    }
+
+    /// Shows and selects the selected door's Street Map marker, at any zoom.
+    private func showSelectedDoor() {
+        guard mode == .street, case .campus(.door(let id)) = appliedSelection, let annotation = doorAnnotations[id] else { return }
+        let wasApplying = isApplyingSelection
+        isApplyingSelection = true
+        defer { isApplyingSelection = wasApplying }
+        if !mapView.annotations.contains(where: { $0 === annotation }) { mapView.addAnnotation(annotation) }
+        mapView.selectAnnotation(annotation, animated: true)
     }
 
     private func dropPin(at coordinate: GeoCoordinate, title: String) {
@@ -509,6 +471,10 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private func reportAnchor() {
         let anchor = CGPoint(x: bounds.midX + cameraAnchor.x, y: bounds.midY + cameraAnchor.y)
         Task { @MainActor [weak self] in self?.onAnchorChange?(anchor) }
+    }
+
+    private static func polygons(of building: Building) -> MKMultiPolygon {
+        MKMultiPolygon(building.parts.map(polygon))
     }
 
     private static func polygon(_ part: BuildingPart) -> MKPolygon {

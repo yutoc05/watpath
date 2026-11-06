@@ -2,7 +2,6 @@
 # Build WatPath and launch it, streaming the app's console to this terminal.
 #   tools/run.sh simulator ["iPhone 17"] [-- launch arguments]
 #   tools/run.sh device [-- launch arguments]
-# Example: tools/run.sh device -- -autoSpike
 set -eu
 cd "$(dirname "$0")/.."
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
@@ -48,7 +47,7 @@ EOF
       -derivedDataPath "$DERIVED" -destination "id=$udid" \
       -allowProvisioningUpdates -allowProvisioningDeviceRegistration build -quiet
     xcrun devicectl device install app --device "$udid" "$DERIVED/Build/Products/Debug-iphoneos/WatPath.app"
-    # The '--' stops devicectl from parsing app arguments like -autoSpike as its own flags.
+    # The '--' stops devicectl from parsing app arguments as its own flags.
     exec xcrun devicectl device process launch --device "$udid" --console --terminate-existing "$BUNDLE_ID" -- "$@"
     ;;
   *)

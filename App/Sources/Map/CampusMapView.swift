@@ -10,13 +10,11 @@ struct CampusMapView: UIViewRepresentable {
         controller.onSelect = { [model] place in model.select(place) }
         controller.onPickerCoordinateChange = { [model] coordinate in model.pickerCoordinate = coordinate }
         controller.onAnchorChange = { [model] anchor in model.mapAnchor = anchor }
-        controller.onCenteredBuildingChange = { [model] code in model.centeredBuilding = code }
         return controller
     }
 
     func updateUIView(_ controller: CampusMapController, context: Context) {
         controller.apply(mode: model.mapMode, animated: true)
-        controller.apply(displayedFloors: model.displayedFloors)
         controller.isPicking = model.activity == .pickingLocation
         controller.cardHeight = model.cardHeight
         controller.apply(selection: model.selection)
