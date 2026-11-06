@@ -49,3 +49,13 @@ Tier 0 = shell, 1 = doors and connections verified.
 Known, but not drawn on the Path Map, because their route isn't mapped.
 
 - `conn-esc-eit-tunnel`: ESC–EIT tunnel
+
+## Routing
+
+Buildings with no lines: routes end at their doors. Doors that are missing a join are
+still on the map, but routes can't go through them on that side.
+
+- Buildings with no lines: CIF, DP, ERC, LHI, M3, OPT, PAC, PAS
+- Doors with no way to a corridor: DC-n1932758473, DC-n1932758483, DC-n1932758543, DC-n1932758580, DC-n2882855806, DC-n2882855808, DC-n2883965005, DC-n7074160863, HH-n1983517462, HH-n3725314869, PSE-n11987866686
+- Doors with no way to a footpath: B1-n1993243529, BMH-n2738049703, DC-n1924311188, DC-n1926390111, DC-n7074160817, DC-n7074160863, EV1-n3726203962, EXP-n3859440766, EXP-n591407990
+- Doors cut off from everything: none

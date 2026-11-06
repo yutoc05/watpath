@@ -1,3 +1,4 @@
+import CampusGeo
 import CampusModel
 import MapKit
 import SwiftUI
@@ -22,7 +23,8 @@ struct SearchField: View {
 }
 
 /// Full-screen search: Recents and Popular when empty, then campus results
-/// (our own index) followed by Apple's results for everything else.
+/// (our own index) followed by Apple's results for everything else. It finds a place to
+/// look at, or, partway through directions, the place you're starting from.
 struct SearchPanel: View {
     let model: AppModel
     @State private var query = ""
@@ -39,7 +41,7 @@ struct SearchPanel: View {
             HStack(spacing: 12) {
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search campus", text: $query)
+                    TextField(isChoosingOrigin ? "Where are you?" : "Search campus", text: $query)
                         .accessibilityIdentifier("searchText")
                         .focused($isFieldFocused)
                         .submitLabel(.search)
@@ -76,18 +78,40 @@ struct SearchPanel: View {
         .onChange(of: query) { completer.update(query: query) }
     }
 
+    private var isChoosingOrigin: Bool {
+        model.directions.step == .searchingOrigin
+    }
+
     @ViewBuilder
     private var emptyQuerySections: some View {
         Section {
+            if isChoosingOrigin {
+                Button {
+                    if let here = model.currentLocation { model.setOrigin(.currentLocation(here)) }
+                } label: {
+                    PlaceRow(
+                        title: "Current Location",
+                        subtitle: model.currentLocation == nil ? "Not available" : "",
+                        systemImage: "location.fill"
+                    )
+                }
+                .disabled(model.currentLocation == nil)
+            }
             Button {
-                model.beginPickingLocation()
+                if isChoosingOrigin {
+                    model.chooseOriginOnMap()
+                } else {
+                    model.beginPickingLocation()
+                }
             } label: {
                 PlaceRow(title: "Choose location on map", subtitle: "Move the map to place a pin", systemImage: "mappin.and.ellipse")
             }
-            Button {
-                model.beginPickingLocation(insidePath: true)
-            } label: {
-                PlaceRow(title: "Choose location inside the path", subtitle: "Place a pin inside a building", systemImage: "building.2.crop.circle")
+            if !isChoosingOrigin {
+                Button {
+                    model.beginPickingLocation(insidePath: true)
+                } label: {
+                    PlaceRow(title: "Choose location inside the path", subtitle: "Place a pin inside a building", systemImage: "building.2.crop.circle")
+                }
             }
         }
         if !model.recents.items.isEmpty {
@@ -126,9 +150,11 @@ struct SearchPanel: View {
             Section("Other Places") {
                 ForEach(completer.results, id: \.self) { completion in
                     Button {
+                        // This can take a moment, and the screen doesn't change until it's done.
+                        UIApplication.shared.dismissKeyboard()
                         Task {
                             if let item = await completer.resolve(completion) {
-                                model.select(.mapItem(item), focus: true, remember: true)
+                                choose(.mapItem(item))
                             }
                         }
                     } label: {
@@ -143,9 +169,17 @@ struct SearchPanel: View {
         }
     }
 
+    private func choose(_ place: Place) {
+        if isChoosingOrigin {
+            model.setOrigin(place, remember: true)
+        } else {
+            model.select(place, focus: true, remember: true)
+        }
+    }
+
     private func placeButton(_ place: Place) -> some View {
         Button {
-            model.select(place, focus: true, remember: true)
+            choose(place)
         } label: {
             if let summary = place.summary(in: model.campus) {
                 PlaceRow(title: summary.title, subtitle: summary.subtitle, systemImage: summary.systemImage)
@@ -155,7 +189,7 @@ struct SearchPanel: View {
 
     private func selectTopResult() {
         if let top = model.searchIndex.search(query, limit: 1).first {
-            model.select(.campus(top.place), focus: true, remember: true)
+            choose(.campus(top.place))
         }
     }
 }
@@ -183,5 +217,12 @@ struct PlaceRow: View {
             .lineLimit(1)
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+extension UIApplication {
+    /// Drops the keyboard now, whatever has it up.
+    func dismissKeyboard() {
+        sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }

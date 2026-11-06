@@ -8,6 +8,15 @@ struct PolygonGeometryTests {
     /// A 20×20 square with a 10×10 courtyard in the middle.
     let courtyard: [[SIMD2<Double>]] = [[[0, 0], [20, 0], [20, 20], [0, 20]], [[5, 5], [15, 5], [15, 15], [5, 15]]]
 
+    @Test func nearestPointOnLinesDoesntCloseThem() {
+        // A U: as a ring its open top would be an edge, and (5, 11) would land on it.
+        let lines: [[SIMD2<Double>]] = [[[0, 10], [0, 0], [10, 0], [10, 10]]]
+        #expect(PolygonGeometry.nearestPoint(onLines: lines, to: [5, 11]) == [0, 10])
+        #expect(PolygonGeometry.nearestPoint(onLines: lines, to: [5, 1]) == [5, 0])
+        #expect(PolygonGeometry.nearestPoint(onLines: [[[0, 0], [10, 0]], [[0, 5], [10, 5]]], to: [3, 4]) == [3, 5])
+        #expect(PolygonGeometry.nearestPoint(onLines: [], to: [0, 0]) == nil)
+    }
+
     @Test func containmentHandlesHoles() {
         #expect(PolygonGeometry.contains(courtyard, [2, 2]))
         #expect(!PolygonGeometry.contains(courtyard, [10, 10]))

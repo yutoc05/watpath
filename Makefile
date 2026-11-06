@@ -12,7 +12,7 @@ help: ## List targets
 project: ## Generate WatPath.xcodeproj from project.yml
 	xcodegen generate --quiet
 
-osm: ## Re-import building outlines from OpenStreetMap (needs network)
+osm: ## Re-import outlines, doors, connections and footpaths from OpenStreetMap (needs network)
 	python3 tools/osm_import/import_osm.py
 
 data: ## Compile data/ into build/CampusBundle

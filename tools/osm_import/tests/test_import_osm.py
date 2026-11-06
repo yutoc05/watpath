@@ -1,4 +1,13 @@
-from import_osm import assemble_rings, build_connections, build_entrances, build_features, element_polygons, signed_area
+from import_osm import (
+    assemble_rings,
+    build_connections,
+    build_entrances,
+    build_features,
+    build_footpaths,
+    element_polygons,
+    is_footpath,
+    signed_area,
+)
 
 
 def test_assemble_rings_joins_reversed_segments():
@@ -101,3 +110,27 @@ def test_an_outline_matching_either_ref_or_name_joins_the_building():
     features, missing = build_features(inventory, elements)
     assert [(f["properties"]["code"], f["properties"]["osmId"]) for f in features] == [("CIF", "way/1"), ("CIF", "way/2")]
     assert missing == []
+
+
+def test_footpaths_are_outdoor_ways_open_to_pedestrians():
+    assert is_footpath({"highway": "footway"})
+    assert is_footpath({"highway": "service", "access": "private", "foot": "yes"})
+    assert is_footpath({"highway": "footway", "tunnel": "building_passage"})
+    assert not is_footpath({"highway": "footway", "indoor": "yes"})
+    assert not is_footpath({"highway": "corridor"})
+    assert not is_footpath({"highway": "service", "access": "private"})
+    assert not is_footpath({"highway": "footway", "foot": "no"})
+    assert not is_footpath({"highway": "secondary"})
+
+
+def test_a_way_that_is_a_connection_is_not_also_a_footpath():
+    way = [{"lon": 0.0, "lat": 0.0}, {"lon": 0.001, "lat": 0.0}]
+    elements = [
+        {"type": "way", "id": 2, "tags": {"highway": "steps"}, "geometry": way},
+        {"type": "way", "id": 1, "tags": {"highway": "footway"}, "geometry": way},
+        {"type": "way", "id": 3, "tags": {"highway": "footway", "bridge": "yes"}, "geometry": way},
+    ]
+    connections = [{"properties": {"osmIds": ["way/3"]}}]
+    features = build_footpaths(elements, connections)
+    assert [(f["properties"]["osmId"], f["properties"]["highway"]) for f in features] == [("way/1", "footway"), ("way/2", "steps")]
+    assert features[0]["geometry"] == {"type": "LineString", "coordinates": [[0.0, 0.0], [0.001, 0.0]]}

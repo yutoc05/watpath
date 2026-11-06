@@ -7,13 +7,15 @@ indoors. It has two map modes that share one camera:
 
 Switching between them is like x-ray vision. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
-**Status:** both maps work:
+**Status:** both maps and routing work:
 - Street Map: door markers, place cards, and search (typo-tolerant, with Recents and Popular).
 - Path Map: every building on one flat level, with thin lines for what's mapped.
+- Directions: from a pin in the Path Map or a place outside, a choice of routes trading time against time outdoors, with stairs counted even though the map is flat.
 - Both: choose-on-map, and one camera shared by the two modes.
 
-Routing and navigation are next. [ADR-001](docs/adr/001-camera-architecture.md) explains the
-shared camera, and [ADR-002](docs/adr/002-flat-path-map.md) how the Path Map is drawn.
+Scrub navigation is next. [ADR-001](docs/adr/001-camera-architecture.md) explains the shared
+camera, [ADR-002](docs/adr/002-flat-path-map.md) how the Path Map is drawn, and
+[ADR-003](docs/adr/003-routing.md) how routes are found.
 
 ## Requirements
 
@@ -48,7 +50,7 @@ Free provisioning expires after 7 days. Run `make device` again to re-sign.
 | Path | Contents |
 |---|---|
 | `App/` | The iOS app (SwiftUI shell, MapKit Street Map, Core Animation Path Map) |
-| `Packages/WatPathKit/` | Platform-independent modules: `CampusGeo` (map projection, camera model, geometry), `CampusModel` (bundle types), `CampusSearch` (offline search, recents) |
+| `Packages/WatPathKit/` | Platform-independent modules: `CampusGeo` (map projection, camera model, geometry), `CampusModel` (bundle types), `CampusSearch` (offline search, recents), `Routing` (walking graph, route search, directions flow) |
 | `AppUITests/` | UI flow tests |
 | `data/` | Map source data: hand-curated `campus/` and generated `osm/` |
 | `tools/` | OSM importer, map compiler, build and run scripts |

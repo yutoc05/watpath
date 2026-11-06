@@ -210,6 +210,60 @@ final class StreetMapFlowTests: XCTestCase {
     }
 
     @MainActor
+    private func assertSwipingDownLeavesTheCardOpen(titled title: String) {
+        // A real drag, from the card's top to the bottom of the screen: a plain swipe on
+        // the title scrolls the card's contents and leaves the card alone.
+        for _ in 0..<2 {
+            let grabber = app.staticTexts["placeTitle"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+            grabber.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 1)), withVelocity: .fast, thenHoldForDuration: 0)
+            sleep(1)
+        }
+        XCTAssertEqual(cardTitle(), title)
+    }
+
+    @MainActor
+    func testSwipingDownNeverClosesACard() {
+        launch()
+        search(for: "mc")
+        tapResult(beginningWith: "Mathematics & Computer")
+        assertSwipingDownLeavesTheCardOpen(titled: "Mathematics & Computer")
+
+        let door = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "North entrance")).firstMatch
+        XCTAssertTrue(door.waitForExistence(timeout: 3))
+        door.tap()
+        // From the card's smallest size, scrolling the row into view can use up the tap.
+        if cardTitle() != "North entrance" { door.tap() }
+        assertSwipingDownLeavesTheCardOpen(titled: "North entrance")
+
+        app.buttons["Close"].tap()
+        XCTAssertFalse(app.staticTexts["placeTitle"].waitForExistence(timeout: 1))
+
+        app.buttons["Search"].tap()
+        let chooseOnMap = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Choose location on map")).firstMatch
+        XCTAssertTrue(chooseOnMap.waitForExistence(timeout: 3))
+        chooseOnMap.tap()
+        XCTAssertTrue(app.buttons["Set Location"].waitForExistence(timeout: 3))
+        sleep(1)
+        app.buttons["Set Location"].tap()
+        assertSwipingDownLeavesTheCardOpen(titled: "Dropped Pin")
+
+        app.buttons["Close"].tap()
+        XCTAssertFalse(app.staticTexts["placeTitle"].waitForExistence(timeout: 1))
+    }
+
+    /// Needs Apple's search to answer, so it steps aside when there's no network.
+    @MainActor
+    func testSwipingDownDoesntCloseAnAppleMapsPlaceCard() throws {
+        launch()
+        search(for: "tim hortons")
+        let result = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Tim Hortons")).firstMatch
+        try XCTSkipUnless(result.waitForExistence(timeout: 10), "Apple's search didn't answer")
+        result.tap()
+        let title = cardTitle()
+        assertSwipingDownLeavesTheCardOpen(titled: title)
+    }
+
+    @MainActor
     private func dismissLocationPromptIfShown() {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let allow = springboard.alerts.buttons["Allow While Using App"]

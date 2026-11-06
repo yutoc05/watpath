@@ -1,6 +1,6 @@
 # WatPath: Project Plan
 
-*Status: Street Map and Path Map work. The door survey, routing and navigation are next · Last updated 2026-11-06*
+*Status: Street Map, Path Map and routing work. Scrub navigation is next, and the door survey is still to do · Last updated 2026-11-06*
 
 WatPath is an iPhone app for getting around the University of Waterloo main campus while staying indoors. It's closely modeled on *Toronto PATH Navigation* (Area 43 Labs). It has two map modes that share one camera, so switching between them feels like x-ray vision:
 
@@ -23,6 +23,7 @@ On top of the maps, the app finds several routes that trade speed against time o
 | Path Map | One opaque 2D view over the map, drawn with Core Animation ([ADR-002](adr/002-flat-path-map.md)) | The map is flat, and MapKit overlays can't keep up with fast moves. |
 | Camera | MapKit owns gestures and the camera in both modes ([ADR-001](adr/001-camera-architecture.md)) | Its camera is modeled exactly (≤ 0.00003 pt RMS), so the x-ray switch costs nothing. |
 | Data strategy | **Whole-campus skeleton first, then fill in detail** | Gives a working end-to-end app early. |
+| Routing | Floor-aware search over one compiled graph ([ADR-003](adr/003-routing.md)) | The map is flat, the buildings aren't, and it all has to work offline. |
 | Backend | None. All data ships inside the app. | Nothing to host, and it works offline. |
 | Out of scope | Live GPS follow-me navigation, Android, accounts, residences, university colleges, satellite campuses | Agreed scope. |
 
@@ -57,6 +58,7 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 - [x] A door marker for every mapped entrance of an in-scope building, styled like a native Apple POI, shown only when zoomed in so the map stays uncluttered.
 - [x] Tapping a door opens a place card with its name, building, level, accessibility notes and photos (or a placeholder).
 - [x] Tapping a building opens its place card: name, code, aliases, every floor, entrances.
+- [x] Dragging a card down shrinks it to its smallest size but never closes it. That's what its X is for.
 
 ### 3.2 Path Map
 - [x] **Simple, and only what we know** ([ADR-002](adr/002-flat-path-map.md)): every building is a flat footprint on black, all on one visual level, with no walls and no floors.
@@ -79,15 +81,19 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 - [x] A top search bar. Results come from our own index (buildings with aliases like "Dana Porter" → DP, "E7" → PSE and "Davis Centre" → DC, and doors), merged with Apple's `MKLocalSearchCompleter` results for anything else.
 - [x] Ranking tolerates typos (prefix, token and edit-distance scoring).
 - [x] **Popular Locations** (curated) and **Recent Locations** (saved on the phone, newest first, de-duplicated).
+- [x] The keyboard drops the moment you leave the search, by any route, rather than after the panel slides away.
 - [x] **Choose location on map**: a pin fixed at screen center, a live lat/long readout, and a confirm button.
 - [x] **Choose location inside the path**: the same, in Path Map. On release, the pin snaps to the nearest point inside a building.
 
 ### 3.5 Directions
-- [ ] Destination chosen, then a prompt: **"I'm in the PATH"** or **"I'm Outside"**.
-- [ ] *I'm in the PATH*: Path Map opens in pin-picking mode. The pin starts at your current location if you're inside an in-scope building, otherwise at the screen center. Dropping it in the black animates it to the nearest walkable point.
-- [ ] *I'm Outside*: an origin search with Current Location, search, recents, popular and choose-on-map.
-- [ ] A route list with 2–4 genuinely different routes. Each shows: total minutes, total distance, % inside (as a small bar), inside length, outside length, a label (Fastest / Most indoor / Balanced), and a **Start** button.
-- [ ] Selecting a route previews it on the map, with the camera framing the whole route.
+- [x] Every place card has a **Directions** button, which leads to a prompt: **"I'm in the PATH"** or **"I'm Outside"**.
+- [x] *I'm in the PATH*: Path Map opens in pin-picking mode. The pin starts at your current location if you're inside an in-scope building, otherwise at the screen center. Dropping it in the black animates it to the nearest walkable point.
+- [x] *I'm Outside*: an origin search with Current Location, search, recents, popular and choose-on-map.
+- [x] A route list of up to 4 genuinely different routes. Each shows: total minutes, total distance, % inside (as a small bar), inside length, outside length, the buildings it passes through, floors to change, and a label (Fastest / Balanced / Less outside / Most indoor, or Best route when there's only one).
+- [x] Selecting a route previews it on both maps, with the camera framing the whole route. Door markers step aside while a route is on show.
+- [x] The routes scroll inside the card under a fixed header, so the map stays in view.
+- [x] The search bar is gone throughout directions, so the Street/Path toggle moves up into its place, and returns when directions end.
+- [ ] A **Start** button on each route, with navigation.
 
 ### 3.6 Navigation (scrub mode)
 - [ ] Start zooms the Path Map to the route start, with the route drawn as a dotted blue line.
@@ -101,10 +107,10 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 ```
 ┌──────────────────────────── SwiftUI app shell ────────────────────────────┐
 │ Search · Mode switch · Map controls · Sheets (search/place/routes)        │
-│ AppModel (@Observable) · later DirectionsFlow (state machine)             │
+│ AppModel (@Observable) · DirectionsFlow (state machine)                   │
 └───────────────┬────────────────────────────────────────┬──────────────────┘
                 │                                        │
-     CampusMapController (UIKit)                  Search · later Routing
+     CampusMapController (UIKit)                     Search · Routing
   ┌─────────────┴───────────────────┐                    │
   │ PathMapView (opaque in Path     │◀── camera model ───┤ (camera each frame)
   │   mode, no touches)             │                    │
@@ -120,7 +126,7 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 **Coordinates:**
 - **Source data:** WGS84 lat/long in GeoJSON.
 - **`MapPlane`:** MapKit's own projection, a local Web Mercator plane centered near MC and scaled to meters there. True east/north meters would drift about 2 m from MapKit's drawing at the edge of campus.
-- **Route lengths** will be true meters, computed by the compiler. On campus they differ from plane distances by at most about 0.2%.
+- **Route lengths** are true meters, computed by the compiler. On campus they differ from plane distances by at most about 0.2%.
 - **Floors** are named **per building**, as signed: MC's floor 3 meets QNC's floor 2, and C2's basement meets MC's floor 1. Each connection end names its building and floor(s). Floors have no height: the map is flat.
 
 **Modules** (one local package, `Packages/WatPathKit`):
@@ -130,16 +136,18 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 | `CampusGeo` | `MapPlane`, MapKit camera model, `GroundProjection`, polygon geometry. Runs on Linux, so CI is cheap. |
 | `CampusModel` | Data types and bundle decoding. Runs on Linux. |
 | `CampusSearch` | Local index and typo-tolerant ranking. |
-| `Routing` (Phase 3) | Graph, multi-route search, snapping, route metrics. Runs on Linux, heavily tested. |
+| `Routing` | Walking graph, floor-aware search, snapping, route lists, `DirectionsFlow`. Runs on Linux, heavily tested. |
 | App target | SwiftUI features, `CampusMapController`, `PathMapView`. |
 
-**Later state:** `DirectionsFlow` will be an explicit, unit-tested state machine:
+**`DirectionsFlow`** is an explicit, unit-tested state machine. It's generic over the place type, so it runs without a screen:
 
 ```
-idle → destinationChosen → originPrompt
-     → pickingOriginInPath | searchingOrigin
-     → routes → navigating → arrived
+idle → originPrompt → pickingOriginInPath ─────────┐
+                    → searchingOrigin ─────────────┤→ findingRoutes → routes | noRoutes
+                        → pickingOriginOnMap ──────┘
 ```
+
+Navigation will add `navigating → arrived`.
 
 **Performance budget (iPhone 12):**
 
@@ -175,15 +183,16 @@ data/
   osm/buildings.geojson     # GENERATED by tools/osm_import: building outlines and level counts
   osm/entrances.geojson     # GENERATED: public entrances on in-scope outlines
   osm/connections.geojson   # GENERATED: bridges, tunnels and links reaching two or more in-scope buildings
+  osm/footpaths.geojson     # GENERATED: outdoor ways open to pedestrians
   photos/<door-id>/         # door photos
   private/                  # gitignored
 ```
 
 ### 5.3 Map compiler (`tools/compiler`, Python + pytest)
 
-`make data` compiles `data/` into `build/CampusBundle`. It validates the inventory, applies hand edits to doors and connections, attaches `lines.geojson` to corridors and connections (`lines.py`), rejects any corridor that leaves the buildings, assigns floors (`floors.py`), cuts bridge arms out of building outlines (`arms.py`: parts narrower than 6 m, found by morphological opening, that a bridge runs along), and finds the dividers between buildings that touch (`dividers.py`).
+`make data` compiles `data/` into `build/CampusBundle`. It validates the inventory, applies hand edits to doors and connections, attaches `lines.geojson` to corridors and connections (`lines.py`), rejects any corridor that leaves the buildings, assigns floors (`floors.py`), cuts bridge arms out of building outlines (`arms.py`: parts narrower than 6 m, found by morphological opening, that a bridge runs along), finds the dividers between buildings that touch (`dividers.py`), and builds the walking graph (`graph.py`), which goes in its own file, `graph.json`, so it doesn't slow launch.
 
-It also writes two generated docs: `docs/coverage.md`, each building's progress, and `docs/survey.md`, the checklist of every unverified door and connection, with map links.
+It also writes two generated docs: `docs/coverage.md`, each building's progress and what routing can't reach yet, and `docs/survey.md`, the checklist of every unverified door and connection, with map links.
 
 The output is deterministic. The Xcode build only *checks* that the bundle's source hash matches `data/`, and fails with a "run `make data`" message if not. Xcode never runs Python.
 
@@ -192,27 +201,33 @@ The output is deterministic. The Xcode build only *checks* that the bundle's sou
 | Tier | Contents | Goal |
 |---|---|---|
 | **0: Shells** | Outline, floors, label | All 38, done |
-| **1: Connectivity** | Every public door verified on foot, every bridge and tunnel | All 38 before routing ships |
+| **1: Connectivity** | Every public door verified on foot, every bridge and tunnel | All 38, on site |
 | **Later** | Door photos, named places, room numbers as destinations | Ongoing |
 
 **Survey routine, per building:** check it on the phone, walk it, record doors and connections in `data/campus/`, take one wide photo from outside and one from inside per door, then `make data`.
 
-## 6. Routing (Phase 3)
+## 6. Routing
 
-- **Graph:** built by the compiler.
-  - **Indoors:** `lines.geojson`. Lines share exact endpoints, so they split cleanly at every junction. Doors attach to the nearest line.
-  - **Outdoors:** footpaths imported from OSM and joined to exterior doors.
-  - Edges carry length (m), kind (`corridor`, `bridge`, `tunnel`, `outdoor`), an indoor flag and a `closed` flag.
-- **Floors:** the lines are flat, so floor changes come from connections. Moving between two connections in one building costs a stair penalty for the storeys between the floors they meet.
-- **Time model:** walking at 1.3 m/s, plus a penalty per storey. All constants live in one config file.
+The decisions, and why, are in [ADR-003](adr/003-routing.md).
+
+- **Graph:** built by the compiler (`graph.py`) into `graph.json`, about 3,400 nodes and 4,300 edges.
+  - **Indoors:** `lines.geojson`. Lines share exact vertices, so they split cleanly at every junction, and the compiler rejects a line that stops just short of another.
+  - **Outdoors:** footpaths imported from OSM, keeping only the largest connected network.
+  - **Doors:** each joins the nearest corridor and the nearest footpath in a straight line, if that line stays inside the building and out of other buildings. Exit-only doors let people out but not in.
+  - **Between buildings:** where a corridor crosses into the next building, each side gets its own node, joined by a zero-length link carrying the floors.
+  - **Arrival:** a building with lines has one arrival point, the nearest point on them to its middle. A building without lines is reached at any of its doors.
+  - Edges carry true length (m), kind (`corridor`, `door`, `bridge`, `tunnel`, `link`, `outdoor`), the building, and `floors` where they change floor. Closed connections are left out.
+- **Floors:** search runs over (node, floor). An edge with `floors` charges for the stairs to reach it and sets the floor on its far side, so moving between two connections in one building costs the storeys between them. Unknown floors are free, and only surveyed doors have a floor.
+- **Time model (`TimeModel`):** walking at 1.3 m/s, 15 s per storey, 5 s per door. All constants live in that one file.
 - **Multiple routes:**
   1. Run Dijkstra with cost = `t_inside + λ·t_outside`, for λ ∈ {1, 1.25, 1.5, 2, 3, 5, 10, 50}.
-  2. Drop near-duplicates (routes sharing more than 80% of their length).
-  3. Remove routes beaten on both total time and outside time (keep the Pareto front).
-  4. Label them Fastest / Balanced / Most indoor.
-- **Endpoints:** a pin snaps to the nearest point on the nearest edge. A temporary node splits that edge, so the graph itself never changes.
-- **Metrics:** totals of distance, time, inside and outside length are summed along the edges. % inside = inside / total distance.
-- **Tests:** small hand-built graphs with known answers, property tests (no returned route is beaten on both measures; λ = 1 gives the true fastest), and real-campus snapshot routes re-checked on every data change.
+  2. Drop routes more than 1.6× the fastest (or 2 minutes longer, on short walks).
+  3. Remove routes beaten on both total time and outside length (keep the Pareto front).
+  4. Keep the fastest and the most indoor, and any other that shares under 80% of its length with those or spares at least 30 m outside.
+  5. Label them. One route is "Best route".
+- **Endpoints:** a pin joins the nearest edge through temporary attachments to that edge's ends, so the graph itself never changes. A pin in a building with no lines joins that building's doors. Farther than 300 m from anything walkable, a place is off the map.
+- **Metrics:** totals of distance, time, inside and outside length are summed along the walk, including the stretch from a pin to the graph. % inside = inside / total distance.
+- **Tests:** small hand-built graphs with known answers, and checks on the real campus that re-run on every data change: every building reaches every other, every door is reachable, no listed route is beaten on both measures, the first route is truly the fastest, and the routes along the main spine stay indoors.
 
 ## 7. Navigation (Phase 4)
 
@@ -231,7 +246,7 @@ watpath/
   Config/                # xcconfig; Local.xcconfig (gitignored) holds your signing team
   App/                   # app target
   AppUITests/            # UI flow tests
-  Packages/WatPathKit/   # CampusGeo, CampusModel, CampusSearch
+  Packages/WatPathKit/   # CampusGeo, CampusModel, CampusSearch, Routing
   data/                  # source data (ODbL); data/private/ gitignored
   tools/compiler/        # Python map compiler + tests
   tools/osm_import/      # OSM importer + tests
@@ -251,8 +266,8 @@ watpath/
 |---|---|---|
 | **Street Map** ✅ | Map and controls, door markers, place cards, search, Popular, Recents, choose-on-map | Every building searchable, every known door tappable |
 | **Path Map** ✅ | Compiler, flat Path Map, lines, floor numbers, labels, cross-fade | Switch modes anywhere on campus without the camera moving |
-| **Survey** | Tier 1 for all 38 (`docs/survey.md`), then line fixes | Every door and connection verified |
-| **Routing** | Footpaths, graph, `Routing` package and tests, DirectionsFlow, both origin flows, route list | Any door or building to any other gives plausible, distinct routes with correct metrics |
+| **Routing** ✅ | Footpaths, graph, `Routing` package and tests, DirectionsFlow, both origin flows, route list | Any door or building to any other gives plausible, distinct routes with correct metrics |
+| **Survey** | Tier 1 for all 38 (`docs/survey.md`), then line fixes. Runs alongside the rest, on site | Every door and connection verified |
 | **Navigation** | Scrub gesture and momentum, camera rig, dotted route, progress bar, ETA card, arrival | 60 fps scrub along a route through 3 or more buildings: **app complete end-to-end** |
 | **Polish** | Animations, haptics, empty/error/permission states, onboarding, app icon, accessibility audit, performance pass, demo video | No known crashes; meets the performance budget; demo video recorded |
 

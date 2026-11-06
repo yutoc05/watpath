@@ -12,6 +12,15 @@ struct PlaceCard: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     header(summary)
+                    Button {
+                        model.beginDirections()
+                    } label: {
+                        Label("Directions", systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("directionsButton")
                     details(for: place)
                 }
                 .padding(20)
@@ -50,7 +59,7 @@ struct PlaceCard: View {
             }
         case .mapItem(let item):
             MapItemDetails(item: item)
-        case .droppedPin(let coordinate):
+        case .droppedPin(let coordinate), .currentLocation(let coordinate):
             DroppedPinDetails(coordinate: coordinate)
         }
     }

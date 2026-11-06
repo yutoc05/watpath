@@ -21,6 +21,11 @@ struct RootView: View {
 }
 
 struct HomeView: View {
+    /// Right below the search field.
+    private static let modePickerTop = 74.0
+    /// On the search field's line, which is free throughout directions.
+    private static let modePickerTopInDirections = 13.0
+
     @Bindable var model: AppModel
     @State private var cardDetent = PresentationDetent.height(AppModel.cardPeekHeight)
     @State private var screenHeight = 844.0
@@ -42,10 +47,10 @@ struct HomeView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if model.activity == .browsing {
+            if model.activity == .browsing || model.activity == .directions {
                 MapModePicker(mode: $model.mapMode)
                     .padding(.leading, 16)
-                    .padding(.top, 74)
+                    .padding(.top, model.activity == .directions ? Self.modePickerTopInDirections : Self.modePickerTop)
             }
         }
         .overlay {
@@ -54,17 +59,30 @@ struct HomeView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .sheet(isPresented: isShowingCard) {
-            PlaceCard(model: model)
-                .presentationDetents([.height(AppModel.cardPeekHeight), .medium, .large], selection: $cardDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .medium))
-                .presentationDragIndicator(.visible)
+        .sheet(isPresented: isShowingSheet) {
+            Group {
+                if model.activity == .directions {
+                    DirectionsSheet(model: model)
+                } else {
+                    PlaceCard(model: model)
+                }
+            }
+            .presentationDetents(detents, selection: detent)
+            .presentationBackgroundInteraction(.enabled(upThrough: .medium))
+            .presentationDragIndicator(.visible)
+            .presentationContentInteraction(model.routePreview == nil ? .automatic : .scrolls)
+            .interactiveDismissDisabled()
         }
         .animation(.snappy, value: model.activity)
+        .onChange(of: model.activity) { _, activity in
+            // Left alone, the keyboard stays up until the search has slid away, nearly a
+            // second later.
+            if activity != .searching { UIApplication.shared.dismissKeyboard() }
+        }
         .onGeometryChange(for: Double.self) { proxy in
             proxy.size.height + proxy.safeAreaInsets.top + proxy.safeAreaInsets.bottom
         } action: { screenHeight = $0 }
-        .onChange(of: cardDetent, initial: true) { updateCardHeight() }
+        .onChange(of: detent.wrappedValue, initial: true) { updateCardHeight() }
         .onChange(of: screenHeight) { updateCardHeight() }
         .onChange(of: model.selection == nil) { _, isEmpty in
             // A new selection always opens the card at its smallest size.
@@ -74,19 +92,44 @@ struct HomeView: View {
     }
 
     private func updateCardHeight() {
-        model.cardHeight = switch cardDetent {
+        model.cardHeight = switch detent.wrappedValue {
         case .medium: screenHeight / 2
         case .large: screenHeight
+        case DirectionsSheet.routesPeek: DirectionsSheet.routesPeekHeight
+        case DirectionsSheet.promptDetent: DirectionsSheet.promptHeight
         default: AppModel.cardPeekHeight
         }
     }
 
-    /// The card shows whenever something is selected and the user isn't searching
-    /// or picking; swiping it away clears the selection.
-    private var isShowingCard: Binding<Bool> {
+    private var detents: Set<PresentationDetent> {
+        switch model.directions.step {
+        case .idle: [.height(AppModel.cardPeekHeight), .medium, .large]
+        case .routes: [DirectionsSheet.routesPeek, .medium, .large]
+        default: [DirectionsSheet.promptDetent]
+        }
+    }
+
+    /// The sheet's size. It stays what the user last made it for as long as that's an
+    /// option, and otherwise opens at a size that suits what's in it.
+    private var detent: Binding<PresentationDetent> {
         Binding(
-            get: { model.selection != nil && model.activity == .browsing },
-            set: { isPresented in if !isPresented { model.select(nil) } }
+            get: {
+                if detents.contains(cardDetent) { return cardDetent }
+                if case .routes = model.directions.step { return .medium }
+                return model.directions.isActive ? DirectionsSheet.promptDetent : .height(AppModel.cardPeekHeight)
+            },
+            set: { cardDetent = $0 }
+        )
+    }
+
+    /// The sheet shows while browsing with something selected, and through directions,
+    /// other than while the map or the search takes over. Dragging can only resize it:
+    /// its X closes it. SwiftUI still reports the sheet closing when something else takes
+    /// over, which needs no answer here.
+    private var isShowingSheet: Binding<Bool> {
+        Binding(
+            get: { model.activity == .directions || (model.selection != nil && model.activity == .browsing) },
+            set: { _ in }
         )
     }
 }

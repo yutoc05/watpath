@@ -4,6 +4,7 @@ import CampusSearch
 import CoreLocation
 import Foundation
 import Observation
+import Routing
 import os
 
 /// App-wide state: what's selected, what the user is doing, and their recents.
@@ -24,6 +25,14 @@ final class AppModel {
         case searching
         /// "Choose location on map": a pin stays centered while the map moves.
         case pickingLocation
+        /// The directions sheet is up: where are you, or which route.
+        case directions
+    }
+
+    /// The routes on the map, and which one is picked.
+    struct RoutePreview: Equatable {
+        var routes: [Route]
+        var selected: Route.ID
     }
 
     let campus: CampusBundle
@@ -31,7 +40,8 @@ final class AppModel {
     let searchIndex: SearchIndex
 
     private(set) var selection: Place?
-    private(set) var activity = Activity.browsing
+    private var browsingActivity = Activity.browsing
+    private(set) var directions = DirectionsFlow<Place>()
     var mapMode = MapMode.street
     /// The camera moves to show this place; a new request (new id) per move.
     private(set) var cameraRequest: CameraRequest?
@@ -47,6 +57,10 @@ final class AppModel {
 
     @ObservationIgnored private let locationManager = CLLocationManager()
     @ObservationIgnored private let recentsURL: URL?
+    /// Built off the main thread at launch, since nothing needs it until directions start.
+    @ObservationIgnored private let router: Task<Router?, Never>
+    /// Whether the user said "I'm in the PATH", which decides how a pin joins the graph.
+    @ObservationIgnored private var originIsInside = false
     private static let logger = Logger(subsystem: "ca.yutochau.watpath", category: "app")
 
     struct CameraRequest: Equatable {
@@ -54,10 +68,38 @@ final class AppModel {
         let place: Place
     }
 
+    /// What the user is doing right now, whether or not they're getting directions.
+    var activity: Activity {
+        switch directions.step {
+        case .idle: browsingActivity
+        case .pickingOriginInPath, .pickingOriginOnMap: .pickingLocation
+        case .searchingOrigin: .searching
+        case .originPrompt, .findingRoutes, .routes, .noRoutes: .directions
+        }
+    }
+
+    var routePreview: RoutePreview? {
+        guard case .routes(let routes, let selected) = directions.step else { return nil }
+        return RoutePreview(routes: routes, selected: selected)
+    }
+
+    /// Where the phone is, if the system knows.
+    var currentLocation: GeoCoordinate? {
+        locationManager.location.map { GeoCoordinate($0.coordinate) }
+    }
+
     init(campus: CampusBundle, bundleURL: URL) {
         self.campus = campus
         self.bundleURL = bundleURL
         searchIndex = SearchIndex(campus: campus)
+        router = Task.detached(priority: .utility) {
+            do {
+                return try Router(graph: WalkGraph.load(from: bundleURL), campus: campus)
+            } catch {
+                Logger(subsystem: "ca.yutochau.watpath", category: "app").error("Couldn't load the walking graph: \(error.localizedDescription, privacy: .public)")
+                return nil
+            }
+        }
         recentsURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("recents.json")
         recents = RecentList()
@@ -73,21 +115,22 @@ final class AppModel {
     /// `remember` adds it to Recents, both for selections made outside the map.
     func select(_ place: Place?, focus: Bool = false, remember: Bool = false) {
         selection = place
-        activity = .browsing
+        browsingActivity = .browsing
         guard let place else { return }
         if focus { cameraRequest = CameraRequest(place: place) }
-        if remember {
-            recents.add(place)
-            saveRecents()
-        }
+        if remember { addToRecents(place) }
     }
 
     func beginSearch() {
-        activity = .searching
+        browsingActivity = .searching
     }
 
     func endSearch() {
-        if activity == .searching { activity = .browsing }
+        if directions.isActive {
+            directions.send(.back)
+        } else if browsingActivity == .searching {
+            browsingActivity = .browsing
+        }
     }
 
     // MARK: Choose location on map
@@ -96,17 +139,92 @@ final class AppModel {
     func beginPickingLocation(insidePath: Bool = false) {
         selection = nil
         if insidePath { mapMode = .path }
-        activity = .pickingLocation
+        browsingActivity = .pickingLocation
     }
-
 
     func finishPickingLocation() {
         guard let coordinate = pickerCoordinate else { return cancelPickingLocation() }
-        select(.droppedPin(coordinate), remember: true)
+        if directions.isActive {
+            setOrigin(.droppedPin(coordinate))
+        } else {
+            select(.droppedPin(coordinate), remember: true)
+        }
     }
 
     func cancelPickingLocation() {
-        activity = .browsing
+        if directions.isActive {
+            directions.send(.back)
+        } else {
+            browsingActivity = .browsing
+        }
+    }
+
+    // MARK: Directions
+
+    /// Directions to the selected place.
+    func beginDirections() {
+        guard let selection else { return }
+        directions.send(.chooseDestination(selection))
+    }
+
+    /// "I'm in the PATH": a pin in the Path Map, starting where the phone is if that's
+    /// inside a building, and otherwise wherever the map already is.
+    func chooseInThePath() {
+        originIsInside = true
+        mapMode = .path
+        directions.send(.chooseInPath)
+        if let here = currentLocation, isInsideABuilding(here) {
+            cameraRequest = CameraRequest(place: .currentLocation(here))
+        }
+    }
+
+    /// "I'm Outside": search for where you are.
+    func chooseOutside() {
+        originIsInside = false
+        directions.send(.chooseOutside)
+    }
+
+    func chooseOriginOnMap() {
+        directions.send(.chooseOriginOnMap)
+    }
+
+    func setOrigin(_ place: Place, remember: Bool = false) {
+        guard let destination = directions.destination else { return }
+        if remember { addToRecents(place) }
+        directions.send(.setOrigin(place))
+        let inside = originIsInside
+        Task {
+            let router = await router.value
+            let routes = await Task.detached(priority: .userInitiated) {
+                guard let router, place != destination,
+                      let start = router.endpoint(for: place, surface: inside ? .indoors : .outdoors),
+                      let end = router.endpoint(for: destination, surface: .outdoors)
+                else { return [Route]() }
+                return router.routes(from: start, to: end)
+            }.value
+            directions.send(.found(routes, from: place))
+        }
+    }
+
+    func selectRoute(_ id: Route.ID) {
+        directions.send(.selectRoute(id))
+    }
+
+    /// One step back: from the route list, that's asking where you are again.
+    func backInDirections() {
+        directions.send(.back)
+    }
+
+    func endDirections() {
+        directions.send(.cancel)
+    }
+
+    private func isInsideABuilding(_ coordinate: GeoCoordinate) -> Bool {
+        let plane = MapPlane(origin: campus.origin)
+        let point = plane.planar(coordinate)
+        return campus.buildings.contains { building in
+            building.parts.contains { PolygonGeometry.contains(([$0.outline] + $0.holes).map { $0.map(plane.planar) }, point) }
+        }
     }
 
     // MARK: Location
@@ -121,6 +239,11 @@ final class AppModel {
 
     func clearRecents() {
         recents.removeAll()
+        saveRecents()
+    }
+
+    private func addToRecents(_ place: Place) {
+        recents.add(place)
         saveRecents()
     }
 
@@ -146,6 +269,18 @@ final class AppModel {
             try JSONEncoder().encode(recents).write(to: recentsURL, options: .atomic)
         } catch {
             Self.logger.error("Couldn't save recents: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+}
+
+nonisolated extension Router {
+    /// `surface` says where a point outside every building should join the graph.
+    func endpoint(for place: Place, surface: Surface) -> Endpoint? {
+        switch place {
+        case .campus(.building(let code)): endpoint(building: code)
+        case .campus(.door(let id)): endpoint(door: id)
+        case .mapItem(let item): endpoint(at: item.coordinate, surface: .outdoors)
+        case .droppedPin(let coordinate), .currentLocation(let coordinate): endpoint(at: coordinate, surface: surface)
         }
     }
 }

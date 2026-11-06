@@ -1,6 +1,7 @@
 import CampusGeo
 import CampusModel
 import CoreLocation
+import Routing
 import UIKit
 
 /// The Path Map: an opaque view over the street map, with everything in it placed from
@@ -14,6 +15,12 @@ import UIKit
 final class PathMapView: UIView {
     /// Doors appear below this camera distance, as in Street Map.
     static let doorsVisibleBelowDistance = 1_400.0
+    static let routeColor = UIColor.systemBlue
+    static let alternativeRouteColor = UIColor(red: 0.55, green: 0.65, blue: 0.8, alpha: 1)
+    /// Routes are the widest thing on either map, in points.
+    static let routeWidth = 5.0
+    /// The white edge around the picked route, which sets it apart from a blue bridge.
+    private static let routeEdgeWidth = 7.5
     /// The width of every line, in points, at any zoom or tilt.
     private static let lineWidth = 1.5
     private static let dividerWidth = 0.5
@@ -77,6 +84,12 @@ final class PathMapView: UIView {
     private var shownLabelTexts: [String: NSAttributedString] = [:]
     private var badges: [FloorBadge] = []
     private var doorMarkers: [(door: Door, point: SIMD2<Double>, view: DoorMarkerDot)] = []
+    private let alternativeRoutes = CAShapeLayer()
+    private let selectedRouteEdge = CAShapeLayer()
+    private let selectedRoute = CAShapeLayer()
+    private var alternativeLines: [[SIMD2<Double>]] = []
+    private var selectedLine: [SIMD2<Double>] = []
+    private let routeStartDot = UIImageView(image: RouteStartMarkerView.image)
     private let userDot = UserLocationDot()
     private let pin = UIImageView(image: UIImage(systemName: "mappin", withConfiguration: UIImage.SymbolConfiguration(pointSize: 34, weight: .semibold)))
 
@@ -100,6 +113,14 @@ final class PathMapView: UIView {
         for kind in [Connection.Kind.tunnel, .bridge] {
             addLines(campus.connections.filter { $0.kind == kind }.flatMap { $0.paths.map(\.points) }, color: kind.color, width: Self.lineWidth, plane: plane)
         }
+        for (route, color, width) in [
+            (alternativeRoutes, Self.alternativeRouteColor, Self.routeWidth),
+            (selectedRouteEdge, UIColor.white, Self.routeEdgeWidth),
+            (selectedRoute, Self.routeColor, Self.routeWidth),
+        ] {
+            style(route, color: color, width: width)
+            layer.addSublayer(route)
+        }
         for connection in campus.connections {
             addBadges(for: connection, plane: plane)
         }
@@ -114,7 +135,9 @@ final class PathMapView: UIView {
         }
         pin.tintColor = .systemRed
         pin.isHidden = true
+        routeStartDot.isHidden = true
         addSubview(userDot)
+        addSubview(routeStartDot)
         addSubview(pin)
     }
 
@@ -130,6 +153,16 @@ final class PathMapView: UIView {
             .min { $0.1 < $1.1 }?.0
     }
 
+    /// The routes to draw: the picked one over the others.
+    func show(route: Route?, alternatives: [Route], plane: MapPlane) {
+        selectedLine = route?.points.map(plane.planar) ?? []
+        alternativeLines = alternatives.map { $0.points.map(plane.planar) }
+        routeStartDot.isHidden = selectedLine.isEmpty
+        if selectedLine.isEmpty {
+            for shape in [alternativeRoutes, selectedRouteEdge, selectedRoute] { shape.path = nil }
+        }
+    }
+
     /// Repositions everything for the current camera.
     func update(projector: PinholeProjector, plane: MapPlane, distance: Double, selection: Place?, userLocation: CLLocation?) {
         let selectedBuilding: String? = if case .campus(.building(let code)) = selection { code } else { nil }
@@ -143,6 +176,19 @@ final class PathMapView: UIView {
         selectedFootprint.path = selectedBuilding.flatMap { rings[$0] }.map { Self.filledPath(of: $0, ground: ground) }
         for set in lineSets {
             set.shape.path = Self.strokedPath(of: set.lines, ground: ground)
+        }
+
+        if let start = selectedLine.first {
+            let path = Self.strokedPath(of: [selectedLine], ground: ground)
+            selectedRoute.path = path
+            selectedRouteEdge.path = path
+            alternativeRoutes.path = Self.strokedPath(of: alternativeLines, ground: ground)
+            if let screen = projector.project(SIMD3(start.x, start.y, 0)) {
+                routeStartDot.isHidden = false
+                routeStartDot.center = CGPoint(x: screen.x, y: screen.y)
+            } else {
+                routeStartDot.isHidden = true
+            }
         }
 
         // Labels: selected building first, then by importance; drop any that would overlap.
@@ -210,7 +256,7 @@ final class PathMapView: UIView {
         }
 
         // Doors last: like Apple Maps' markers, they give way to labels and to each other.
-        let showDoors = distance < Self.doorsVisibleBelowDistance
+        let showDoors = distance < Self.doorsVisibleBelowDistance && selectedLine.isEmpty
         for (door, point, marker) in doorMarkers where door.id != selectedDoor {
             marker.isSelectedMarker = false
             guard showDoors, let screen = projector.project(SIMD3(point.x, point.y, 0)) else {
@@ -238,7 +284,7 @@ final class PathMapView: UIView {
         switch selection {
         case .mapItem(let item):
             placePin(at: item.coordinate, projector: projector, plane: plane)
-        case .droppedPin(let coordinate):
+        case .droppedPin(let coordinate), .currentLocation(let coordinate):
             placePin(at: coordinate, projector: projector, plane: plane)
         default:
             pin.isHidden = true
@@ -279,13 +325,17 @@ final class PathMapView: UIView {
 
     // MARK: Building
 
-    private func addLines(_ lines: [[GeoCoordinate]], color: UIColor, width: CGFloat, plane: MapPlane) {
-        let shape = CAShapeLayer()
+    private func style(_ shape: CAShapeLayer, color: UIColor, width: CGFloat) {
         shape.strokeColor = color.cgColor
         shape.fillColor = nil
         shape.lineWidth = width
         shape.lineCap = .round
         shape.lineJoin = .round
+    }
+
+    private func addLines(_ lines: [[GeoCoordinate]], color: UIColor, width: CGFloat, plane: MapPlane) {
+        let shape = CAShapeLayer()
+        style(shape, color: color, width: width)
         layer.addSublayer(shape)
         lineSets.append(LineSet(shape: shape, lines: lines.map { $0.map(plane.planar) }))
     }

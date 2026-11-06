@@ -2,12 +2,12 @@ import CampusGeo
 import Foundation
 
 /// The compiled map data the app ships with (build/CampusBundle, produced by
-/// tools/compiler). Schema v9: Tier 0 building shells with every floor they have,
+/// tools/compiler). Schema v10: Tier 0 building shells with every floor they have,
 /// the Path Map's lines (corridors, each bridge's and tunnel's own, and the dividers
 /// between buildings that touch), doors, building-to-building connections with the
 /// floor at each end, and Popular places.
 public struct CampusBundle: Sendable, Decodable {
-    public static let supportedSchemaVersion = 9
+    public static let supportedSchemaVersion = 10
 
     public var schemaVersion: Int
     public var origin: GeoCoordinate

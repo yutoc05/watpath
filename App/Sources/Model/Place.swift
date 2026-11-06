@@ -9,6 +9,8 @@ nonisolated enum Place: Hashable, Codable, Sendable {
     /// A result from Apple's search, for places our campus data doesn't cover.
     case mapItem(MapItemPlace)
     case droppedPin(GeoCoordinate)
+    /// Where the phone is. Only ever a route's origin, so it's never kept in Recents.
+    case currentLocation(GeoCoordinate)
 }
 
 /// The parts of an `MKMapItem` we keep, as plain values so they can be stored.
@@ -45,6 +47,8 @@ extension Place {
             return PlaceSummary(title: item.name, subtitle: item.address ?? "", systemImage: "mappin", coordinate: item.coordinate)
         case .droppedPin(let coordinate):
             return PlaceSummary(title: "Dropped Pin", subtitle: coordinate.formatted, systemImage: "mappin.and.ellipse", coordinate: coordinate)
+        case .currentLocation(let coordinate):
+            return PlaceSummary(title: "Current Location", subtitle: "", systemImage: "location.fill", coordinate: coordinate)
         }
     }
 }

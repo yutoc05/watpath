@@ -30,7 +30,7 @@ struct SearchIndexTests {
          "level":null,"accessible":null,"verified":false,"photos":[]}
         """
         let json = """
-        {"schemaVersion":9,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"",
+        {"schemaVersion":10,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"",
          "buildings":[\(buildingJSON.joined(separator: ","))],"corridors":[],"dividers":[],"doors":[\(doorJSON)],"connections":[],"popular":[]}
         """
         return try! CampusBundle.decode(Data(json.utf8))

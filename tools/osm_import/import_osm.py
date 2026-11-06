@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Import building outlines, entrances and building-to-building connections for the
-in-scope inventory from OpenStreetMap.
+"""Import building outlines, entrances, building-to-building connections and outdoor
+footpaths for the in-scope inventory from OpenStreetMap.
 
-Writes data/osm/buildings.geojson, entrances.geojson and connections.geojson. All
-are generated: never hand-edit them, re-run this script instead (hand edits go in
-data/campus/doors.json and connections.json). Output is sorted and one feature per
-line so diffs stay readable. Map data © OpenStreetMap contributors, ODbL.
+Writes data/osm/buildings.geojson, entrances.geojson, connections.geojson and
+footpaths.geojson. All are generated: never hand-edit them, re-run this script instead
+(hand edits go in data/campus/doors.json and connections.json). Output is sorted and
+one feature per line so diffs stay readable. Map data © OpenStreetMap contributors, ODbL.
 
 Usage:
-    python3 tools/osm_import/import_osm.py            # fetch from Overpass
-    python3 tools/osm_import/import_osm.py --offline  # reuse build/cache response
+    python3 tools/osm_import/import_osm.py              # fetch from Overpass
+    python3 tools/osm_import/import_osm.py --offline    # reuse build/cache responses
+    python3 tools/osm_import/import_osm.py --footpaths  # refresh only footpaths.geojson
 """
 
 from __future__ import annotations
@@ -29,7 +30,9 @@ INVENTORY_PATH = REPO / "data/campus/inventory.json"
 OUTPUT_PATH = REPO / "data/osm/buildings.geojson"
 ENTRANCES_PATH = REPO / "data/osm/entrances.geojson"
 CONNECTIONS_PATH = REPO / "data/osm/connections.geojson"
+FOOTPATHS_PATH = REPO / "data/osm/footpaths.geojson"
 CACHE_PATH = REPO / "build/cache/overpass-buildings.json"
+FOOTPATHS_CACHE_PATH = REPO / "build/cache/overpass-footpaths.json"
 
 # south, west, north, east. Covers the main campus and the athletics fields.
 BBOX = (43.4640, -80.5530, 43.4790, -80.5350)
@@ -53,6 +56,11 @@ CONNECTION_SNAP_METERS = 3.0
 # Indoor ways must run at least this far outside every outline to count as a link
 # between buildings rather than a corridor inside one.
 CONNECTION_MIN_OUTSIDE_METERS = 3.0
+# Ways a person can walk along outdoors. Bigger roads (Ring Road, University Avenue) have
+# their sidewalks and crossings mapped separately, so routes keep to those.
+FOOTPATH_HIGHWAYS = ("cycleway", "footway", "living_street", "path", "pedestrian", "residential", "service", "steps")
+NO_ACCESS = {"no", "private", "customers"}
+FOOT_ALLOWED = {"yes", "designated", "permissive"}
 
 Point = tuple[float, float]  # (lon, lat), GeoJSON order
 Ring = list[Point]
@@ -67,6 +75,11 @@ def overpass_query() -> str:
         f'way["highway"]["tunnel"]({s},{w},{n},{e});way["highway"="corridor"]({s},{w},{n},{e}););'
         "out geom;"
     )
+
+
+def footpaths_query() -> str:
+    s, w, n, e = BBOX
+    return f'[out:json][timeout:90];way["highway"~"^({"|".join(FOOTPATH_HIGHWAYS)})$"]({s},{w},{n},{e});out geom;'
 
 
 def fetch_overpass(query: str, attempts: int = 4) -> dict:
@@ -343,6 +356,35 @@ def build_connections(elements: list[dict], outlines: list[dict]) -> list[dict]:
     return features
 
 
+def is_footpath(tags: dict) -> bool:
+    """Outdoors and open to pedestrians. Indoor ways belong to the Path Map's own lines."""
+    if tags.get("highway") not in FOOTPATH_HIGHWAYS or tags.get("indoor") == "yes":
+        return False
+    if tags.get("foot") in NO_ACCESS:
+        return False
+    return tags.get("access") not in NO_ACCESS or tags.get("foot") in FOOT_ALLOWED
+
+
+def build_footpaths(elements: list[dict], connections: list[dict]) -> list[dict]:
+    """Outdoor ways to walk along. A way that is one of the connections is left out:
+    OSM doesn't always tag a bridge as indoors, and routes take it from the Path Map."""
+    taken = {way for feature in connections for way in feature["properties"]["osmIds"]}
+    features = []
+    for element in elements:
+        tags = element.get("tags", {})
+        way = f'way/{element["id"]}'
+        points = geometry_points(element.get("geometry", []))
+        if element["type"] != "way" or len(points) < 2 or way in taken or not is_footpath(tags):
+            continue
+        features.append({
+            "type": "Feature",
+            "properties": {"osmId": way, "highway": tags["highway"]},
+            "geometry": {"type": "LineString", "coordinates": rounded(points)},
+        })
+    features.sort(key=lambda f: int(f["properties"]["osmId"].split("/")[1]))
+    return features
+
+
 def write_feature_collection(path: Path, features: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(feature, separators=(",", ":"), sort_keys=True) for feature in features]
@@ -350,18 +392,33 @@ def write_feature_collection(path: Path, features: list[dict]) -> None:
     path.write_text(header + ",\n".join(lines) + "\n]}\n", encoding="utf-8")
 
 
+def overpass_response(query: str, cache: Path, offline: bool) -> dict:
+    if offline:
+        return json.loads(cache.read_text(encoding="utf-8"))
+    response = fetch_overpass(query)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps(response), encoding="utf-8")
+    return response
+
+
+def import_footpaths(connections: list[dict], offline: bool) -> None:
+    response = overpass_response(footpaths_query(), FOOTPATHS_CACHE_PATH, offline)
+    footpaths = build_footpaths(response.get("elements", []), connections)
+    write_feature_collection(FOOTPATHS_PATH, footpaths)
+    print(f"Wrote {len(footpaths)} footpaths to {FOOTPATHS_PATH.relative_to(REPO)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--offline", action="store_true", help="reuse the cached Overpass response")
+    parser.add_argument("--offline", action="store_true", help="reuse the cached Overpass responses")
+    parser.add_argument("--footpaths", action="store_true", help="refresh only footpaths.geojson")
     args = parser.parse_args()
 
-    if args.offline:
-        response = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
-    else:
-        response = fetch_overpass(overpass_query())
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CACHE_PATH.write_text(json.dumps(response), encoding="utf-8")
+    if args.footpaths:
+        import_footpaths(json.loads(CONNECTIONS_PATH.read_text(encoding="utf-8"))["features"], args.offline)
+        return 0
 
+    response = overpass_response(overpass_query(), CACHE_PATH, args.offline)
     inventory = json.loads(INVENTORY_PATH.read_text(encoding="utf-8"))["buildings"]
     elements = response.get("elements", [])
     features, missing = build_features(inventory, elements)
@@ -376,6 +433,7 @@ def main() -> int:
     with_doors = {f["properties"]["code"] for f in entrances}
     print(f"Wrote {len(entrances)} entrances on {len(with_doors)} buildings to {ENTRANCES_PATH.relative_to(REPO)}")
     print(f"Wrote {len(connections)} building-to-building connections to {CONNECTIONS_PATH.relative_to(REPO)}")
+    import_footpaths(connections, args.offline)
     no_doors = sorted({e["code"] for e in inventory} - with_doors)
     if no_doors:
         print(f"No mapped entrances in OSM (survey needed): {', '.join(no_doors)}")

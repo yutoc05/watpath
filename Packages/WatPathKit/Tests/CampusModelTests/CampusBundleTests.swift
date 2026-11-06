@@ -5,7 +5,7 @@ import Testing
 
 struct CampusBundleTests {
     let json = """
-    {"schemaVersion":9,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"© OpenStreetMap contributors",
+    {"schemaVersion":10,"origin":{"latitude":43.472,"longitude":-80.544},"attribution":"© OpenStreetMap contributors",
      "buildings":[{"code":"MC","name":"Mathematics & Computer","aliases":["Math & Computer"],"group":"core","priority":1,
        "levelsEstimated":false,"label":[-80.5436,43.4723],
        "floors":[{"name":"B","title":"Basement"},{"name":"1","title":"Floor 1"},{"name":"2","title":"Floor 2"},{"name":"3","title":"Floor 3"}],
@@ -80,8 +80,8 @@ struct CampusBundleTests {
     }
 
     @Test func rejectsOtherSchemaVersions() {
-        let old = json.replacingOccurrences(of: "\"schemaVersion\":9", with: "\"schemaVersion\":8")
-        #expect(throws: CampusBundle.LoadError.unsupportedSchema(8)) {
+        let old = json.replacingOccurrences(of: "\"schemaVersion\":10", with: "\"schemaVersion\":9")
+        #expect(throws: CampusBundle.LoadError.unsupportedSchema(9)) {
             try CampusBundle.decode(Data(old.utf8))
         }
     }

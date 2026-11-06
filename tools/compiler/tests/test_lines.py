@@ -1,5 +1,5 @@
 from arms import LocalFrame
-from lines import attach_lines, check_corridors_inside
+from lines import attach_lines, check_corridors_inside, check_lines_meet
 
 
 def line(kind, points=((0, 0), (1, 1)), **properties):
@@ -92,4 +92,28 @@ def test_a_corridor_that_leaves_the_buildings_is_an_error():
 
 def test_a_corridor_may_touch_a_wall():
     check_corridors_inside([corridor((5, 20), (40.2, 20))], [square(0, 40)], FRAME, issues := [])
+    assert issues == []
+
+
+def geo(*points):
+    return {"geometry": {"coordinates": [list(p) for p in points]}}
+
+
+def test_lines_that_share_a_vertex_meet():
+    frame = LocalFrame({"latitude": 43.47, "longitude": -80.54})
+    a, b, c = frame.to_lonlat((0, 0)), frame.to_lonlat((50, 0)), frame.to_lonlat((50, 50))
+    check_lines_meet([geo(a, b, c), geo(b, frame.to_lonlat((100, 0)))], frame, issues := [])
+    assert issues == []
+
+
+def test_a_line_that_stops_just_short_of_another_is_an_error():
+    frame = LocalFrame({"latitude": 43.47, "longitude": -80.54})
+    a, b = frame.to_lonlat((0, 0)), frame.to_lonlat((100, 0))
+    check_lines_meet([geo(a, b), geo(frame.to_lonlat((50, 0.2)), frame.to_lonlat((50, 50)))], frame, issues := [])
+    assert any("stops short" in m for m in errors(issues))
+
+
+def test_lines_that_end_apart_are_fine():
+    frame = LocalFrame({"latitude": 43.47, "longitude": -80.54})
+    check_lines_meet([geo(frame.to_lonlat((0, 0)), frame.to_lonlat((100, 0))), geo(frame.to_lonlat((50, 5)), frame.to_lonlat((50, 50)))], frame, issues := [])
     assert issues == []

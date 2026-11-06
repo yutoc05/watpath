@@ -1,6 +1,7 @@
 import CampusGeo
 import CampusModel
 import MapKit
+import Routing
 import UIKit
 import os
 
@@ -20,6 +21,14 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private static let logger = Logger(subsystem: "ca.yutochau.watpath", category: "map")
     /// How far inside a building "choose location inside the path" puts the pin.
     private static let snapInset = 3.0
+    /// Picking a spot indoors means seeing the lines, so the map comes in at least this close.
+    private static let pickingDistance = 700.0
+    /// How close to look when the pin starts where the phone is.
+    private static let hereDistance = 400.0
+    /// Margin around a route shown whole, in points.
+    private static let routeMargin = CGSize(width: 64, height: 36)
+    /// How close and how far to come when framing a route, in meters.
+    private static let routeDistances = 180.0...3_000.0
 
     let mapView = MKMapView()
     var onSelect: ((Place?) -> Void)?
@@ -27,12 +36,22 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     var onPickerCoordinateChange: ((GeoCoordinate) -> Void)?
     /// Screen point (in this view) where MapKit keeps the camera center.
     var onAnchorChange: ((CGPoint) -> Void)?
-    /// Height of the place card over the bottom of the map; selections are framed above it.
-    var cardHeight = 300.0
+    /// Height of the card over the bottom of the map; selections and routes are framed above it.
+    var cardHeight = 300.0 {
+        didSet {
+            if cardHeight != oldValue { frameSelectedRoute() }
+        }
+    }
+    /// While set, tapping the map selects nothing: it's busy showing something else.
+    var isSelectionLocked = false
+    /// The pin's "nearest walkable point" while picking where you are, rather than the
+    /// nearest point in a building.
+    var pickerSnapsToLines = false
     var isPicking = false {
         didSet {
             guard isPicking, !oldValue else { return }
             snapPickerIntoPathIfNeeded()
+            if pickerSnapsToLines { comeCloseEnoughToPick() }
             let center = GeoCoordinate(mapView.centerCoordinate)
             Task { @MainActor [weak self] in self?.onPickerCoordinateChange?(center) }
         }
@@ -50,11 +69,18 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private let doorAnnotations: [String: DoorAnnotation]
     /// Building outlines on the map plane, for hit-testing taps and snapping.
     private let outlines: [(code: String, rings: [[SIMD2<Double>]])]
+    /// Everything the Path Map draws a line for, and the buildings with none of those
+    /// inside: the places a pin can stand when it needs to be somewhere walkable.
+    private let walkableLines: [[SIMD2<Double>]]
+    private let linelessOutlines: [[[SIMD2<Double>]]]
     private var doorsShown = false
     private var highlight: MKMultiPolygon?
     private var pin: MKPointAnnotation?
     private var appliedSelection: Place?
     private var appliedCameraRequest: UUID?
+    private var appliedRoutePreview: AppModel.RoutePreview?
+    private var routeOverlays: [RouteOverlay] = []
+    private var routeStart: MKPointAnnotation?
     /// Set while we change MapKit's selection ourselves, so delegate callbacks
     /// don't echo it back as a user action.
     private var isApplyingSelection = false
@@ -68,6 +94,11 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         outlines = campus.buildings.map { building in
             (building.code, building.parts.flatMap { part in ([part.outline] + part.holes).map { $0.map(plane.planar) } })
         }
+        let lines = (campus.corridors + campus.connections.flatMap { $0.paths.map(\.points) }).map { $0.map(plane.planar) }
+        walkableLines = lines
+        linelessOutlines = outlines.map(\.rings).filter { rings in
+            !lines.contains { line in line.contains { PolygonGeometry.contains(rings, $0) } }
+        }
         super.init(frame: .zero)
 
         mapView.delegate = self
@@ -75,6 +106,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         mapView.showsUserLocation = true
         mapView.register(DoorMarkerView.self, forAnnotationViewWithReuseIdentifier: DoorMarkerView.reuseIdentifier)
         mapView.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier: Self.pinReuseIdentifier)
+        mapView.register(RouteStartMarkerView.self, forAnnotationViewWithReuseIdentifier: RouteStartMarkerView.reuseIdentifier)
         mapView.camera = MKMapCamera(lookingAtCenter: Self.campusCenter(campus).clCoordinate, fromDistance: 2_400, pitch: 0, heading: 0)
         addSubview(mapView)
 
@@ -181,7 +213,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
             showSelectedDoor()
         case .mapItem(let item):
             dropPin(at: item.coordinate, title: item.name)
-        case .droppedPin(let coordinate):
+        case .droppedPin(let coordinate), .currentLocation(let coordinate):
             dropPin(at: coordinate, title: "Dropped Pin")
         case nil:
             break
@@ -197,12 +229,70 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         guard let cameraRequest, cameraRequest.id != appliedCameraRequest else { return }
         appliedCameraRequest = cameraRequest.id
         guard let summary = cameraRequest.place.summary(in: campus) else { return }
-        let distance = switch cameraRequest.place {
-        case .campus(.building(let code)): campus.building(code: code).map(framingDistance) ?? 400
-        case .campus(.door): 280.0
-        case .mapItem, .droppedPin: 700.0
+        let camera = switch cameraRequest.place {
+        case .campus(.building(let code)): camera(showing: summary.coordinate, distance: campus.building(code: code).map(framingDistance) ?? 400)
+        case .campus(.door): camera(showing: summary.coordinate, distance: 280)
+        case .mapItem, .droppedPin: camera(showing: summary.coordinate, distance: 700)
+        case .currentLocation:
+            // The pin sits at the map's center, so this goes there, not above a card.
+            MKMapCamera(lookingAtCenter: summary.coordinate.clCoordinate, fromDistance: Self.hereDistance, pitch: mapView.camera.pitch, heading: mapView.camera.heading)
         }
-        mapView.setCamera(camera(showing: summary.coordinate, distance: distance), animated: true)
+        mapView.setCamera(camera, animated: true)
+    }
+
+    /// Shows routes on both maps, or clears them with nil, and frames the picked one.
+    func apply(routePreview: AppModel.RoutePreview?) {
+        guard routePreview != appliedRoutePreview else { return }
+        let highlightChanges = (routePreview == nil) != (appliedRoutePreview == nil)
+        appliedRoutePreview = routePreview
+        if highlightChanges, let highlight {
+            mapView.removeOverlay(highlight)
+            mapView.addOverlay(highlight, level: .aboveRoads)
+        }
+        let selected = routePreview?.routes.first { $0.id == routePreview?.selected }
+        let others = routePreview?.routes.filter { $0.id != routePreview?.selected } ?? []
+
+        pathMap.show(route: selected, alternatives: others, plane: plane)
+
+        mapView.removeOverlays(routeOverlays)
+        // In order, so the picked route ends up on top.
+        routeOverlays = (others + (selected.map { [$0] } ?? [])).map { route in
+            RouteOverlay(route: route, isSelected: route.id == selected?.id)
+        }
+        mapView.addOverlays(routeOverlays, level: .aboveLabels)
+
+        if let routeStart { mapView.removeAnnotation(routeStart) }
+        routeStart = nil
+        if let start = selected?.points.first {
+            let annotation = MKPointAnnotation()
+            annotation.coordinate = start.clCoordinate
+            mapView.addAnnotation(annotation)
+            routeStart = annotation
+        }
+        updateDoorVisibility()
+        frameSelectedRoute()
+    }
+
+    /// Fits the picked route between the top of the map and the card, seen from above.
+    private func frameSelectedRoute() {
+        guard let preview = appliedRoutePreview, let route = preview.routes.first(where: { $0.id == preview.selected }) else { return }
+        let band = visibleBand.insetBy(dx: Self.routeMargin.width, dy: Self.routeMargin.height)
+        guard band.height > 40, bounds.height > 0 else { return }
+
+        // The route's extent along the screen's axes, which the heading turns.
+        let heading = mapView.camera.heading * .pi / 180
+        let right = SIMD2(cos(heading), -sin(heading)), up = SIMD2(sin(heading), cos(heading))
+        let points = route.points.map(plane.planar)
+        let across = points.map { ($0 * right).sum() }, along = points.map { ($0 * up).sum() }
+        guard let west = across.min(), let east = across.max(), let south = along.min(), let north = along.max() else { return }
+        let middle = right * ((west + east) / 2) + up * ((south + north) / 2)
+
+        // Looking straight down, the screen's height covers 2·altitude·tan(FOV/2) of ground.
+        let model = MapKitCameraModel.measured
+        let metersPerPoint = max((east - west) / Double(band.width), (north - south) / Double(band.height))
+        let distance = metersPerPoint * Double(bounds.height) / (2 * model.altitudeScale * tan(model.verticalFieldOfView * .pi / 360))
+        let clamped = min(max(distance, Self.routeDistances.lowerBound), Self.routeDistances.upperBound)
+        mapView.setCamera(camera(showing: plane.coordinate(fromPlanar: middle), distance: clamped, pitch: 0), animated: true)
     }
 
     // MARK: Path Map
@@ -229,15 +319,27 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     }
 
     /// "Choose location inside the path": if the pin is out in the black, slide the
-    /// map so the pin lands just inside the nearest building.
+    /// map so the pin lands just inside the nearest building or, when it's marking where
+    /// you are, on the nearest place you could be walking.
     private func snapPickerIntoPathIfNeeded() {
         guard isPicking, mode == .path else { return }
         let center = plane.planar(GeoCoordinate(mapView.centerCoordinate))
         guard !outlines.contains(where: { PolygonGeometry.contains($0.rings, center) }) else { return }
-        let candidates = outlines.map { PolygonGeometry.nearestPointInside($0.rings, center, inset: Self.snapInset) }
+        var candidates = (pickerSnapsToLines ? linelessOutlines : outlines.map(\.rings)).map {
+            PolygonGeometry.nearestPointInside($0, center, inset: Self.snapInset)
+        }
+        if pickerSnapsToLines, let onLine = PolygonGeometry.nearestPoint(onLines: walkableLines, to: center) {
+            candidates.append(onLine)
+        }
         guard let target = candidates.min(by: { length($0 - center) < length($1 - center) }) else { return }
         guard let camera = mapView.camera.copy() as? MKMapCamera else { return }
         camera.centerCoordinate = plane.coordinate(fromPlanar: target).clCoordinate
+        mapView.setCamera(camera, animated: true)
+    }
+
+    private func comeCloseEnoughToPick() {
+        guard mapView.camera.centerCoordinateDistance > Self.pickingDistance, let camera = mapView.camera.copy() as? MKMapCamera else { return }
+        camera.centerCoordinateDistance = Self.pickingDistance
         mapView.setCamera(camera, animated: true)
     }
 
@@ -263,8 +365,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     /// target, find the ground point drawn where we want the target; shifting the
     /// camera by the difference moves the target there, since moving the camera
     /// across a flat map moves everything on screen equally.
-    private func camera(showing coordinate: GeoCoordinate, distance: Double) -> MKMapCamera {
-        let pitch = mapView.camera.pitch, heading = mapView.camera.heading
+    private func camera(showing coordinate: GeoCoordinate, distance: Double, pitch: CGFloat? = nil) -> MKMapCamera {
+        let pitch = pitch ?? mapView.camera.pitch, heading = mapView.camera.heading
         let projector = PinholeProjector(
             state: MapCameraState(center: coordinate, distance: distance, heading: heading, pitch: Double(pitch)),
             plane: plane,
@@ -325,6 +427,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
             mapView.dequeueReusableAnnotationView(withIdentifier: DoorMarkerView.reuseIdentifier, for: annotation)
         case let pin as MKPointAnnotation where pin === self.pin:
             mapView.dequeueReusableAnnotationView(withIdentifier: Self.pinReuseIdentifier, for: annotation)
+        case let start as MKPointAnnotation where start === routeStart:
+            mapView.dequeueReusableAnnotationView(withIdentifier: RouteStartMarkerView.reuseIdentifier, for: annotation)
         default:
             nil  // the user location dot, drawn by MapKit
         }
@@ -332,6 +436,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     func mapView(_ mapView: MKMapView, didSelect annotation: any MKAnnotation) {
         guard !isApplyingSelection, let door = annotation as? DoorAnnotation else { return }
+        guard !isSelectionLocked else { return mapView.deselectAnnotation(annotation, animated: false) }
         clearHighlight()
         appliedSelection = .campus(.door(id: door.door.id))
         onSelect?(appliedSelection)
@@ -339,10 +444,17 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     }
 
     func mapView(_ mapView: MKMapView, rendererFor overlay: any MKOverlay) -> MKOverlayRenderer {
+        if let overlay = overlay as? RouteOverlay {
+            let renderer = MKPolylineRenderer(polyline: overlay)
+            renderer.strokeColor = overlay.isSelected ? PathMapView.routeColor : PathMapView.alternativeRouteColor
+            renderer.lineWidth = PathMapView.routeWidth
+            return renderer
+        }
         guard let overlay = overlay as? MKMultiPolygon else { return MKOverlayRenderer(overlay: overlay) }
         let renderer = MKMultiPolygonRenderer(multiPolygon: overlay)
         renderer.fillColor = .tintColor.withAlphaComponent(0.18)
-        renderer.strokeColor = .tintColor
+        // Beside a route, an outline would read as more route.
+        renderer.strokeColor = appliedRoutePreview == nil ? .tintColor : nil
         renderer.lineWidth = 2
         return renderer
     }
@@ -383,7 +495,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     }
 
     @objc private func handleTap(_ recognizer: UITapGestureRecognizer) {
-        guard !isPicking else { return }
+        guard !isPicking, !isSelectionLocked else { return }
         let point = recognizer.location(in: mapView)
         var ground: SIMD2<Double>? = plane.planar(GeoCoordinate(mapView.convert(point, toCoordinateFrom: mapView)))
         if mode == .path {
@@ -418,9 +530,10 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private static let pinReuseIdentifier = "pin"
 
     /// MapKit's door markers are the Street Map's, and only zoomed in: above that
-    /// they'd clutter the map. The Path Map draws its own.
+    /// they'd clutter the map. A route on show has the map to itself. The Path Map
+    /// draws its own.
     private func updateDoorVisibility() {
-        let shouldShow = mode == .street && mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance
+        let shouldShow = mode == .street && appliedRoutePreview == nil && mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance
         guard shouldShow != doorsShown else { return }
         doorsShown = shouldShow
         if shouldShow {

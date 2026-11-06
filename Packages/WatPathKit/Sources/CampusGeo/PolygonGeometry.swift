@@ -34,6 +34,24 @@ public enum PolygonGeometry {
         return best
     }
 
+    /// Closest point on any of `lines`, which are open: unlike a ring, the last point
+    /// doesn't join the first.
+    public static func nearestPoint(onLines lines: [[SIMD2<Double>]], to point: SIMD2<Double>) -> SIMD2<Double>? {
+        var best: SIMD2<Double>?
+        var bestDistance = Double.infinity
+        for line in lines {
+            for (a, b) in zip(line, line.dropFirst()) {
+                let candidate = closestPoint(onSegment: a, b, to: point)
+                let distance = length(candidate - point)
+                if distance < bestDistance {
+                    bestDistance = distance
+                    best = candidate
+                }
+            }
+        }
+        return best
+    }
+
     public static func distanceToEdges(_ rings: [[SIMD2<Double>]], _ point: SIMD2<Double>) -> Double {
         length(nearestEdgePoint(rings, point) - point)
     }

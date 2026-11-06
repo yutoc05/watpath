@@ -15,9 +15,12 @@ struct CampusMapView: UIViewRepresentable {
 
     func updateUIView(_ controller: CampusMapController, context: Context) {
         controller.apply(mode: model.mapMode, animated: true)
+        controller.pickerSnapsToLines = model.directions.step == .pickingOriginInPath
         controller.isPicking = model.activity == .pickingLocation
+        controller.isSelectionLocked = model.activity != .browsing
         controller.cardHeight = model.cardHeight
         controller.apply(selection: model.selection)
         controller.apply(cameraRequest: model.cameraRequest)
+        controller.apply(routePreview: model.routePreview)
     }
 }

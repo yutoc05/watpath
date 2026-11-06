@@ -17,7 +17,7 @@ struct LocationPickerOverlay: View {
             }
             VStack {
                 VStack(spacing: 4) {
-                    Text(model.mapMode == .path ? "Choose location inside the path" : "Choose location on map")
+                    Text(title)
                         .font(.headline)
                     Text(model.pickerCoordinate?.formatted ?? " ")
                         .accessibilityIdentifier("pickerCoordinate")
@@ -43,6 +43,11 @@ struct LocationPickerOverlay: View {
                 .padding(.bottom, 12)
             }
         }
+    }
+
+    private var title: String {
+        if model.directions.isActive { return "Where are you?" }
+        return model.mapMode == .path ? "Choose location inside the path" : "Choose location on map"
     }
 
     private var pin: some View {

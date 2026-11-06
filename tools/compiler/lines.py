@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from arms import LocalFrame, outline
 from issues import Issue
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 from shapely.ops import unary_union
 
 KINDS = {"corridor", "bridge", "tunnel"}
 # A corridor may leave a building by this much, in meters: outlines aren't exact.
 OUTSIDE_TOLERANCE = 0.3
+# A line that ends this close to another, in meters, was meant to join it.
+JOIN_TOLERANCE = 1.0
 
 
 def attach_lines(connections: list[dict], features: list[dict], issues: list[Issue]) -> list[list]:
@@ -67,3 +69,17 @@ def check_corridors_inside(corridors: list[list], buildings: list[dict], frame: 
             if piece.length > OUTSIDE_TOLERANCE:
                 east, north = piece.coords[0]
                 issues.append(Issue("error", f"lines.geojson: a corridor runs {piece.length:.1f} m outside the buildings at {frame.to_lonlat((east, north))}"))
+
+
+def check_lines_meet(features: list[dict], frame: LocalFrame, issues: list[Issue]) -> None:
+    """Lines join only at shared vertices: that's how the routing graph knows they meet.
+    One that stops just short looks joined on the map and silently isn't."""
+    lines = [[tuple(p) for p in f["geometry"]["coordinates"]] for f in features]
+    shapes = [LineString([frame.to_meters(list(p)) for p in line]) for line in lines]
+    vertices = [set(line) for line in lines]
+    for index, line in enumerate(lines):
+        for end in (line[0], line[-1]):
+            near = Point(frame.to_meters(list(end)))
+            others = [i for i, shape in enumerate(shapes) if i != index and shape.distance(near) < JOIN_TOLERANCE]
+            if others and not any(end in vertices[i] for i in others):
+                issues.append(Issue("error", f"lines.geojson: the line ending at {list(end)} stops short of another: give them a shared vertex"))

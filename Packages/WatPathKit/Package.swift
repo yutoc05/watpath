@@ -10,13 +10,16 @@ let package = Package(
         .library(name: "CampusGeo", targets: ["CampusGeo"]),
         .library(name: "CampusModel", targets: ["CampusModel"]),
         .library(name: "CampusSearch", targets: ["CampusSearch"]),
+        .library(name: "Routing", targets: ["Routing"]),
     ],
     targets: [
         .target(name: "CampusGeo"),
         .target(name: "CampusModel", dependencies: ["CampusGeo"]),
         .target(name: "CampusSearch", dependencies: ["CampusModel"]),
+        .target(name: "Routing", dependencies: ["CampusGeo", "CampusModel"]),
         .testTarget(name: "CampusGeoTests", dependencies: ["CampusGeo"]),
         .testTarget(name: "CampusModelTests", dependencies: ["CampusModel"]),
         .testTarget(name: "CampusSearchTests", dependencies: ["CampusSearch"]),
+        .testTarget(name: "RoutingTests", dependencies: ["Routing"]),
     ]
 )
