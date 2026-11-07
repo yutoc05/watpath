@@ -102,6 +102,48 @@ struct DirectionsFlowTests {
         #expect(flow == Flow())
     }
 
+    private func navigating() -> Flow {
+        flow(.chooseDestination("DC"), .chooseOutside, .setOrigin("MC"), .found([route(0), route(1)], from: "MC"), .startRoute(1))
+    }
+
+    @Test func startingARouteNavigatesThatRoute() {
+        let flow = navigating()
+        #expect(flow.step == .navigating(route(1)))
+        #expect(flow.activeRoute == route(1))
+        #expect(flow.destination == "DC")
+    }
+
+    @Test func aRouteThatIsntOnTheListDoesntStart() {
+        var flow = flow(.chooseDestination("DC"), .chooseOutside, .setOrigin("MC"), .found([route(0)], from: "MC"))
+        flow.send(.startRoute(9))
+        #expect(flow.activeRoute == nil)
+    }
+
+    @Test func reachingTheEndArrivesAndScrubbingBackUndoesIt() {
+        var flow = navigating()
+        flow.send(.reachedEnd)
+        #expect(flow.step == .arrived(route(1)))
+        #expect(flow.activeRoute == route(1))
+        flow.send(.leftEnd)
+        #expect(flow.step == .navigating(route(1)))
+    }
+
+    @Test func endingLeavesFromNavigatingOrArrived() {
+        var flow = navigating()
+        flow.send(.cancel)
+        #expect(flow == Flow())
+        flow = navigating()
+        flow.send(.reachedEnd)
+        flow.send(.cancel)
+        #expect(flow == Flow())
+    }
+
+    @Test func thereIsNoGoingBackFromNavigationExceptByEnding() {
+        var flow = navigating()
+        flow.send(.back)
+        #expect(flow.activeRoute != nil)
+    }
+
     @Test func eventsThatMakeNoSenseAreIgnored() {
         #expect(flow(.chooseInPath).step == .idle)
         #expect(flow(.setOrigin("MC")).step == .idle)
@@ -109,5 +151,7 @@ struct DirectionsFlowTests {
         #expect(flow(.chooseDestination("DC"), .setOrigin("MC")).step == .originPrompt)
         #expect(flow(.chooseDestination("DC"), .chooseDestination("MC")).destination == "DC")
         #expect(flow(.chooseDestination("DC"), .chooseInPath, .chooseOriginOnMap).step == .pickingOriginInPath)
+        #expect(flow(.chooseDestination("DC"), .startRoute(0)).step == .originPrompt)
+        #expect(flow(.reachedEnd).step == .idle)
     }
 }

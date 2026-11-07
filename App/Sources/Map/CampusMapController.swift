@@ -25,6 +25,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private static let pickingDistance = 700.0
     /// How close to look when the pin starts where the phone is.
     private static let hereDistance = 400.0
+    /// How far to look down on the destination when navigation ends.
+    private static let arrivalDistance = 400.0
     /// Margin around a route shown whole, in points.
     private static let routeMargin = CGSize(width: 64, height: 36)
     /// How close and how far to come when framing a route, in meters.
@@ -36,6 +38,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     var onPickerCoordinateChange: ((GeoCoordinate) -> Void)?
     /// Screen point (in this view) where MapKit keeps the camera center.
     var onAnchorChange: ((CGPoint) -> Void)?
+    /// While navigating: what's left of the route, whenever the card would show a change.
+    var onNavigationStatus: ((AppModel.NavigationStatus, Bool) -> Void)?
     /// Height of the card over the bottom of the map; selections and routes are framed above it.
     var cardHeight = 300.0 {
         didSet {
@@ -61,8 +65,26 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private let plane: MapPlane
     private lazy var controls = MapControlsView(mapView: mapView)
     private let pathMap: PathMapView
+    private let navigationOverlay = NavigationOverlayView()
     private var mode = AppModel.MapMode.street
+    /// Whether the Path Map is, or is fading, in. Navigation shows the Street Map outdoors.
+    private var pathMapIsUp = false
     private var displayLink: CADisplayLink?
+    private var lastFrame: CFTimeInterval?
+    /// Fully covering the Street Map, with no fade under way.
+    private var pathMapIsOpaque = false
+    /// Everything that moves during navigation. Nil the rest of the time.
+    private var rig: NavigationRig?
+    /// The camera while navigating. It's kept here because MapKit doesn't always hear it:
+    /// see `advanceNavigation`.
+    private var navigationCamera: MapCameraState?
+    /// The camera's trip to the start of the route.
+    private var flight: CameraFlight?
+    private var reportedStatus: AppModel.NavigationStatus?
+    private var reportedAtEnd = false
+    private let scrubPan = UIPanGestureRecognizer()
+    /// A touch coming down, which catches a flick before any drag has started.
+    private let scrubHold = UILongPressGestureRecognizer()
     private let pathPan = UIPanGestureRecognizer()
     /// While panning the Path Map: the map-plane point the finger is holding.
     private var pathPanAnchor: SIMD2<Double>?
@@ -113,6 +135,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         pathMap.alpha = 0
         pathMap.isHidden = true
         addSubview(pathMap)
+        addSubview(navigationOverlay)
 
         controls.translatesAutoresizingMaskIntoConstraints = false
         addSubview(controls)
@@ -137,6 +160,18 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         pathPan.isEnabled = false
         pathPan.delegate = self
         mapView.addGestureRecognizer(pathPan)
+
+        scrubPan.addTarget(self, action: #selector(handleScrub))
+        scrubPan.isEnabled = false
+        // On this view, not the map, which is hidden for much of a walk.
+        scrubPan.delegate = self
+        addGestureRecognizer(scrubPan)
+        scrubHold.addTarget(self, action: #selector(handleScrubHold))
+        scrubHold.minimumPressDuration = 0
+        scrubHold.cancelsTouchesInView = false
+        scrubHold.isEnabled = false
+        scrubHold.delegate = self
+        addGestureRecognizer(scrubHold)
     }
 
     @available(*, unavailable)
@@ -144,9 +179,9 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        for view in [mapView, pathMap] as [UIView] { view.frame = bounds }
+        for view in [mapView, pathMap, navigationOverlay] as [UIView] { view.frame = bounds }
         reportAnchor()
-        syncPathMap()
+        syncOverlays()
     }
 
     override func safeAreaInsetsDidChange() {
@@ -162,6 +197,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         let link = CADisplayLink(target: self, selector: #selector(displayFrame))
         link.add(to: .main, forMode: .common)
         displayLink = link
+        lastFrame = nil
     }
 
     // MARK: Applying app state
@@ -169,17 +205,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     func apply(mode newMode: AppModel.MapMode, animated: Bool) {
         guard newMode != mode else { return }
         mode = newMode
-        mapView.isScrollEnabled = mode == .street
-        pathPan.isEnabled = mode == .path
-        if mode == .path {
-            pathMap.isHidden = false
-            syncPathMap()
-        }
-        UIView.animate(withDuration: animated ? Self.fadeSeconds : 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-            self.pathMap.alpha = newMode == .path ? 1 : 0
-        } completion: { _ in
-            if self.mode == .street { self.pathMap.isHidden = true }
-        }
+        enableMapGestures()
+        showPathMap(mode == .path, animated: animated)
         updateDoorVisibility()
         if mode == .path {
             mapView.removeAnnotations(Array(doorAnnotations.values))
@@ -220,6 +247,43 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         }
     }
 
+    /// Re-adds the highlight, the only way to make MapKit restyle an overlay.
+    private func redrawHighlight() {
+        guard let highlight else { return }
+        mapView.removeOverlay(highlight)
+        mapView.addOverlay(highlight, level: .aboveRoads)
+    }
+
+    /// Fades the Path Map in or out over the Street Map. The camera doesn't move.
+    private func showPathMap(_ show: Bool, animated: Bool) {
+        guard show != pathMapIsUp else { return }
+        pathMapIsUp = show
+        pathMapIsOpaque = false
+        if show {
+            pathMap.isHidden = false
+            syncOverlays()
+        }
+        UIView.animate(withDuration: animated ? Self.fadeSeconds : 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.pathMap.alpha = show ? 1 : 0
+        } completion: { _ in
+            if !self.pathMapIsUp { self.pathMap.isHidden = true }
+            self.pathMapIsOpaque = self.pathMapIsUp && self.pathMap.alpha == 1
+        }
+    }
+
+    /// Who moves the map: nobody but the scrub gesture while navigating, and otherwise
+    /// MapKit, except for the Path Map's own one-finger pan.
+    private func enableMapGestures() {
+        let navigating = rig != nil
+        mapView.isScrollEnabled = !navigating && mode == .street
+        mapView.isZoomEnabled = !navigating
+        mapView.isRotateEnabled = !navigating
+        mapView.isPitchEnabled = !navigating
+        pathPan.isEnabled = !navigating && mode == .path
+        scrubPan.isEnabled = navigating
+        scrubHold.isEnabled = navigating
+    }
+
     private func clearHighlight() {
         if let highlight { mapView.removeOverlay(highlight) }
         highlight = nil
@@ -245,10 +309,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         guard routePreview != appliedRoutePreview else { return }
         let highlightChanges = (routePreview == nil) != (appliedRoutePreview == nil)
         appliedRoutePreview = routePreview
-        if highlightChanges, let highlight {
-            mapView.removeOverlay(highlight)
-            mapView.addOverlay(highlight, level: .aboveRoads)
-        }
+        if highlightChanges { redrawHighlight() }
         let selected = routePreview?.routes.first { $0.id == routePreview?.selected }
         let others = routePreview?.routes.filter { $0.id != routePreview?.selected } ?? []
 
@@ -297,21 +358,35 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
     // MARK: Path Map
 
-    @objc private func displayFrame() {
-        syncPathMap()
+    @objc private func displayFrame(_ link: CADisplayLink) {
+        // A frame's real length, so a dropped one doesn't slow the walker down.
+        let seconds = lastFrame.map { min(link.timestamp - $0, 0.1) } ?? 0
+        lastFrame = link.timestamp
+        if rig != nil { advanceNavigation(seconds: seconds) }
+        syncOverlays()
     }
 
-    /// Redraws the Path Map from MapKit's current camera.
-    private func syncPathMap() {
-        guard !pathMap.isHidden, bounds.height > 0 else { return }
-        let state = MapCameraState(mapView.camera)
-        pathMap.update(
-            projector: projector(for: state),
-            plane: plane,
-            distance: state.distance,
-            selection: appliedSelection,
-            userLocation: mapView.userLocation.location
-        )
+    /// Redraws what we draw ourselves from MapKit's current camera.
+    private func syncOverlays() {
+        guard bounds.height > 0, !pathMap.isHidden || rig != nil else { return }
+        let state = currentCamera
+        let projector = projector(for: state)
+        if !pathMap.isHidden {
+            pathMap.update(
+                projector: projector,
+                plane: plane,
+                distance: state.distance,
+                // Close up, a highlighted destination would fill the screen. The flag marks it.
+                selection: rig == nil ? appliedSelection : nil,
+                userLocation: mapView.userLocation.location
+            )
+        }
+        if let pose = rig?.pose { navigationOverlay.update(projector: projector, pose: pose) }
+    }
+
+    /// The camera everything we draw is drawn from.
+    private var currentCamera: MapCameraState {
+        navigationCamera ?? MapCameraState(mapView.camera)
     }
 
     private func projector(for state: MapCameraState) -> PinholeProjector {
@@ -343,6 +418,115 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         mapView.setCamera(camera, animated: true)
     }
 
+    // MARK: Navigation
+
+    /// Starts navigating `route`, or stops with nil.
+    func apply(navigation route: Route?) {
+        guard (route == nil) != (rig == nil) else { return }
+        if let route {
+            let rig = NavigationRig(route: route, plane: plane)
+            self.rig = rig
+            flight = CameraFlight(from: MapCameraState(mapView.camera), seconds: rig.tuning.flightSeconds)
+            reportedStatus = nil
+            reportedAtEnd = false
+            navigationOverlay.show(track: rig.track, dotSpacing: rig.tuning.dotSpacing)
+        } else {
+            // MapKit may have slept through the walk, so it hears where it ended first.
+            if let navigationCamera { mapView.setCamera(camera(for: navigationCamera), animated: false) }
+            mapView.isHidden = false
+            navigationCamera = nil
+            rig = nil
+            flight = nil
+            navigationOverlay.hide()
+            showPathMap(mode == .path, animated: true)
+            // Back to looking at the destination from above, clear of its card.
+            if let end = selectionCoordinate { mapView.setCamera(camera(showing: end, distance: Self.arrivalDistance, pitch: 0), animated: true) }
+        }
+        let navigating = rig != nil
+        pathMap.hidesDoors = navigating
+        controls.isHidden = navigating
+        redrawHighlight()
+        enableMapGestures()
+        updateDoorVisibility()
+    }
+
+    /// Moves the walker and the camera on by a frame.
+    private func advanceNavigation(seconds: Double) {
+        rig?.advance(seconds: seconds)
+        guard let rig, bounds.height > 0 else { return }
+        let pose = rig.pose
+        var state = cameraState(
+            drawing: pose.aim,
+            at: SIMD2(Double(bounds.midX), Double(bounds.height) * rig.tuning.walkerHeight),
+            distance: rig.tuning.cameraDistance,
+            heading: pose.heading,
+            pitch: rig.tuning.pitch
+        )
+        if flight != nil {
+            flight?.advance(seconds: seconds)
+            state = flight?.state(toward: state) ?? state
+            if flight?.isFinished == true { flight = nil }
+        }
+        navigationCamera = state
+
+        // MapKit would spend most of the frame drawing 3D buildings behind an opaque Path
+        // Map, so while nobody can see it, it's hidden and not told about the camera. The
+        // route says when an outdoor stretch is coming, in time to wake it first.
+        let isNeeded = flight != nil || !pathMapIsOpaque
+            || rig.track.isNearOutside(at: pose.distance, within: rig.tuning.streetMapLeadMeters)
+        if mapView.isHidden == isNeeded { mapView.isHidden = !isNeeded }
+        if isNeeded { mapView.setCamera(camera(for: state), animated: false) }
+
+        showPathMap(!pose.isOutside, animated: true)
+        reportNavigation(pose, isAtEnd: rig.isAtEnd)
+    }
+
+    private func camera(for state: MapCameraState) -> MKMapCamera {
+        MKMapCamera(lookingAtCenter: state.center.clCoordinate, fromDistance: state.distance, pitch: state.pitch, heading: state.heading)
+    }
+
+    /// Tells the app only when the card would change, since a report redraws it.
+    private func reportNavigation(_ pose: NavigationRig.Pose, isAtEnd: Bool) {
+        let status = AppModel.NavigationStatus(
+            distanceRemaining: (pose.distanceRemaining / 10).rounded() * 10,
+            secondsRemaining: (pose.secondsRemaining / 15).rounded() * 15
+        )
+        guard status != reportedStatus || isAtEnd != reportedAtEnd else { return }
+        reportedStatus = status
+        reportedAtEnd = isAtEnd
+        Task { @MainActor [weak self] in self?.onNavigationStatus?(status, isAtEnd) }
+    }
+
+    /// Meters of route a point of finger movement covers: however much ground it drags
+    /// past the walker, so the route tracks the finger, times the gain.
+    private var scrubMetersPerPoint: Double {
+        guard let rig else { return 0 }
+        let screen = SIMD2(Double(bounds.midX), Double(bounds.height) * rig.tuning.walkerHeight)
+        let projector = projector(for: currentCamera)
+        guard let here = projector.unproject(screen), let next = projector.unproject(screen + SIMD2(0, 1)) else { return 0 }
+        return length(SIMD2(here.x - next.x, here.y - next.y)) * rig.tuning.dragGain
+    }
+
+    /// A drag down walks forward, the way the ground would move past you. The flight to
+    /// the start isn't interrupted: the camera is about to land.
+    @objc private func handleScrub(_ recognizer: UIPanGestureRecognizer) {
+        guard flight == nil else { return recognizer.setTranslation(.zero, in: self) }
+        let scale = scrubMetersPerPoint
+        switch recognizer.state {
+        case .changed:
+            rig?.drag(by: Double(recognizer.translation(in: self).y) * scale)
+            recognizer.setTranslation(.zero, in: self)
+        case .ended:
+            rig?.flick(metersPerSecond: Double(recognizer.velocity(in: self).y) * scale)
+        default:
+            break
+        }
+    }
+
+    @objc private func handleScrubHold(_ recognizer: UILongPressGestureRecognizer) {
+        if recognizer.state == .began { rig?.hold() }
+    }
+
     // MARK: Framing
 
     /// Pans (keeping zoom) if `coordinate` is off screen or under the search field or card.
@@ -366,21 +550,24 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     /// camera by the difference moves the target there, since moving the camera
     /// across a flat map moves everything on screen equally.
     private func camera(showing coordinate: GeoCoordinate, distance: Double, pitch: CGFloat? = nil) -> MKMapCamera {
-        let pitch = pitch ?? mapView.camera.pitch, heading = mapView.camera.heading
-        let projector = PinholeProjector(
-            state: MapCameraState(center: coordinate, distance: distance, heading: heading, pitch: Double(pitch)),
-            plane: plane,
-            model: .measured,
-            viewportSize: viewportSize,
-            anchor: cameraAnchor
-        )
-        var center = coordinate
         let band = visibleBand
-        if let ground = projector.unproject(SIMD2(Double(band.midX), Double(band.midY))) {
-            let target = plane.planar(coordinate)
-            center = plane.coordinate(fromPlanar: target + (target - SIMD2(ground.x, ground.y)))
+        let state = cameraState(
+            drawing: plane.planar(coordinate),
+            at: SIMD2(Double(band.midX), Double(band.midY)),
+            distance: distance,
+            heading: mapView.camera.heading,
+            pitch: Double(pitch ?? mapView.camera.pitch)
+        )
+        return MKMapCamera(lookingAtCenter: state.center.clCoordinate, fromDistance: distance, pitch: state.pitch, heading: state.heading)
+    }
+
+    /// The camera that draws `target` at the screen point `screen`.
+    private func cameraState(drawing target: SIMD2<Double>, at screen: SIMD2<Double>, distance: Double, heading: Double, pitch: Double) -> MapCameraState {
+        var state = MapCameraState(center: plane.coordinate(fromPlanar: target), distance: distance, heading: heading, pitch: pitch)
+        if let ground = projector(for: state).unproject(screen) {
+            state.center = plane.coordinate(fromPlanar: target + (target - SIMD2(ground.x, ground.y)))
         }
-        return MKMapCamera(lookingAtCenter: center.clCoordinate, fromDistance: distance, pitch: pitch, heading: heading)
+        return state
     }
 
     /// Camera distance that fits the building across a portrait screen. MapKit's
@@ -407,7 +594,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     // MARK: MKMapViewDelegate
 
     func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
-        syncPathMap()  // as soon as MapKit moves, for the least lag behind the finger
+        syncOverlays()  // as soon as MapKit moves, for the least lag behind the finger
         controls.updatePitchButton()
         updateDoorVisibility()
         if isPicking {
@@ -454,7 +641,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         let renderer = MKMultiPolygonRenderer(multiPolygon: overlay)
         renderer.fillColor = .tintColor.withAlphaComponent(0.18)
         // Beside a route, an outline would read as more route.
-        renderer.strokeColor = appliedRoutePreview == nil ? .tintColor : nil
+        renderer.strokeColor = appliedRoutePreview == nil && rig == nil ? .tintColor : nil
         renderer.lineWidth = 2
         return renderer
     }
@@ -533,7 +720,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     /// they'd clutter the map. A route on show has the map to itself. The Path Map
     /// draws its own.
     private func updateDoorVisibility() {
-        let shouldShow = mode == .street && appliedRoutePreview == nil && mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance
+        let shouldShow = mode == .street && appliedRoutePreview == nil && rig == nil && mapView.camera.centerCoordinateDistance < Self.doorsVisibleBelowDistance
         guard shouldShow != doorsShown else { return }
         doorsShown = shouldShow
         if shouldShow {
@@ -562,6 +749,11 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         mapView.addAnnotation(annotation)
         mapView.selectAnnotation(annotation, animated: true)
         pin = annotation
+    }
+
+    /// Where the selected place is.
+    private var selectionCoordinate: GeoCoordinate? {
+        appliedSelection?.summary(in: campus)?.coordinate
     }
 
     private func reportAnchor() {

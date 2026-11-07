@@ -52,6 +52,9 @@ struct CampusRoutesTests {
                 for route in routes {
                     #expect(abs(route.insideLength + route.outsideLength - route.distance) < 1e-6)
                     #expect(abs(route.spans.reduce(0) { $0 + $1.length } - route.distance) < 1e-6)
+                    #expect(abs(route.spans.reduce(0) { $0 + $1.seconds } - route.seconds) < 1e-6, "\(from) to \(to)")
+                    #expect(abs(route.secondsRemaining(at: 0) - route.seconds) < 1e-6)
+                    #expect(route.secondsRemaining(at: route.distance) < 1e-6)
                     #expect(route.points.count >= 2)
                     #expect(!routes.contains { route.isBeaten(by: $0) }, "\(from) to \(to)")
                 }

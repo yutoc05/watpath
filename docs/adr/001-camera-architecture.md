@@ -18,8 +18,11 @@ MapKit doesn't document its camera: not its field of view, how it turns
 - Every display frame, that view reads `MKMapView.camera` and draws from it using the
   measured model below (`CampusGeo.CameraPose`).
 
-One exception: Path mode pans with its own one-finger gesture, because MapKit's fling
-momentum can't be switched off. It still moves MapKit's camera.
+Two exceptions:
+- Path mode pans with its own one-finger gesture, because MapKit's fling momentum can't
+  be switched off. It still moves MapKit's camera.
+- Navigation drives the camera itself ([ADR-004](004-navigation.md)), and doesn't always
+  tell MapKit.
 
 ## How MapKit's camera was measured
 

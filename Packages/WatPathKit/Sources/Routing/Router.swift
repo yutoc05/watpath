@@ -199,12 +199,14 @@ public struct Router: Sendable {
         var doors = 0
         var buildings: [String] = []
 
-        func add(_ kind: WalkGraph.Edge.Kind, _ points: [GeoCoordinate], _ length: Double) {
+        func add(_ kind: WalkGraph.Edge.Kind, _ points: [GeoCoordinate], _ length: Double, extraSeconds: Double = 0) {
+            let seconds = length / model.walkingSpeed + extraSeconds
             if let last = spans.indices.last, spans[last].kind == kind {
                 spans[last].points += points
                 spans[last].length += length
+                spans[last].seconds += seconds
             } else if length > 0 || points.count > 1 {
-                spans.append(Route.Span(kind: kind, points: points, length: length))
+                spans.append(Route.Span(kind: kind, points: points, length: length, seconds: seconds))
             }
         }
         func add(_ attachment: Endpoint.Attachment, reversed: Bool) {
@@ -221,7 +223,8 @@ public struct Router: Sendable {
         for hop in walk.hops {
             let edge = graph.edges[hop.edge]
             let line = graph.line(of: edge)
-            add(edge.kind, hop.isForward ? line : line.reversed(), edge.length)
+            let door = edge.kind == .door ? model.doorSeconds : 0
+            add(edge.kind, hop.isForward ? line : line.reversed(), edge.length, extraSeconds: door + hop.storeys * model.storeySeconds)
             if edge.kind.isInside { inside += edge.length } else { outside += edge.length }
             if edge.kind == .door { doors += 1 }
             if let building = edge.building, buildings.last != building, edge.kind != .door { buildings.append(building) }

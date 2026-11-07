@@ -11,11 +11,13 @@ Switching between them is like x-ray vision. The full plan is in [docs/PLAN.md](
 - Street Map: door markers, place cards, and search (typo-tolerant, with Recents and Popular).
 - Path Map: every building on one flat level, with thin lines for what's mapped.
 - Directions: from a pin in the Path Map or a place outside, a choice of routes trading time against time outdoors, with stairs counted even though the map is flat.
+- Navigation: drag anywhere to walk along a route, with the camera turning through its corners and the Street Map fading in outdoors.
 - Both: choose-on-map, and one camera shared by the two modes.
 
-Scrub navigation is next. [ADR-001](docs/adr/001-camera-architecture.md) explains the shared
-camera, [ADR-002](docs/adr/002-flat-path-map.md) how the Path Map is drawn, and
-[ADR-003](docs/adr/003-routing.md) how routes are found.
+[ADR-001](docs/adr/001-camera-architecture.md) explains the shared camera,
+[ADR-002](docs/adr/002-flat-path-map.md) how the Path Map is drawn,
+[ADR-003](docs/adr/003-routing.md) how routes are found, and
+[ADR-004](docs/adr/004-navigation.md) how navigation moves.
 
 ## Requirements
 
@@ -50,7 +52,7 @@ Free provisioning expires after 7 days. Run `make device` again to re-sign.
 | Path | Contents |
 |---|---|
 | `App/` | The iOS app (SwiftUI shell, MapKit Street Map, Core Animation Path Map) |
-| `Packages/WatPathKit/` | Platform-independent modules: `CampusGeo` (map projection, camera model, geometry), `CampusModel` (bundle types), `CampusSearch` (offline search, recents), `Routing` (walking graph, route search, directions flow) |
+| `Packages/WatPathKit/` | Platform-independent modules: `CampusGeo` (map projection, camera model, geometry), `CampusModel` (bundle types), `CampusSearch` (offline search, recents), `Routing` (walking graph, route search, directions flow, navigation) |
 | `AppUITests/` | UI flow tests |
 | `data/` | Map source data: hand-curated `campus/` and generated `osm/` |
 | `tools/` | OSM importer, map compiler, build and run scripts |

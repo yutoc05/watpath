@@ -16,6 +16,8 @@ public struct Route: Sendable, Identifiable, Equatable {
         public var points: [GeoCoordinate]
         /// Meters.
         public var length: Double
+        /// How long it takes, including any door and stairs along it.
+        public var seconds: Double
     }
 
     /// Its place in the list it came from.
@@ -46,6 +48,22 @@ public struct Route: Sendable, Identifiable, Equatable {
     /// How much of the walk is indoors, from 0 to 1.
     public var insideFraction: Double {
         distance > 0 ? insideLength / distance : 1
+    }
+
+    /// How long is left from `distance` meters along the route.
+    public func secondsRemaining(at distance: Double) -> Double {
+        var walked = 0.0
+        var left = seconds
+        for span in spans {
+            let end = walked + span.length
+            if distance >= end {
+                left -= span.seconds
+                walked = end
+            } else {
+                return max(left - span.seconds * (distance - walked) / span.length, 0)
+            }
+        }
+        return 0
     }
 
     /// True when `other` is at least as good on both time and time outside, and

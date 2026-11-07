@@ -6,6 +6,7 @@
 /// idle → originPrompt → pickingOriginInPath ──────────────┐
 ///                     → searchingOrigin ──────────────────┤→ findingRoutes → routes | noRoutes
 ///                         → pickingOriginOnMap ───────────┘
+/// routes → navigating ⇄ arrived
 /// ```
 public struct DirectionsFlow<Place: Hashable & Sendable>: Sendable, Equatable {
     public enum Step: Sendable, Equatable {
@@ -20,6 +21,10 @@ public struct DirectionsFlow<Place: Hashable & Sendable>: Sendable, Equatable {
         case findingRoutes
         case routes([Route], selected: Route.ID)
         case noRoutes
+        /// Scrubbing along a route.
+        case navigating(Route)
+        /// At the end of it. Scrubbing back is still allowed.
+        case arrived(Route)
     }
 
     public enum Event: Sendable {
@@ -31,6 +36,9 @@ public struct DirectionsFlow<Place: Hashable & Sendable>: Sendable, Equatable {
         /// Routes from `origin`, however long ago they were asked for.
         case found([Route], from: Place)
         case selectRoute(Route.ID)
+        case startRoute(Route.ID)
+        case reachedEnd
+        case leftEnd
         /// One step back.
         case back
         /// All the way out.
@@ -51,6 +59,14 @@ public struct DirectionsFlow<Place: Hashable & Sendable>: Sendable, Equatable {
         return routes.first { $0.id == selected }
     }
 
+    /// The route being walked, if any.
+    public var activeRoute: Route? {
+        switch step {
+        case .navigating(let route), .arrived(let route): route
+        default: nil
+        }
+    }
+
     public mutating func send(_ event: Event) {
         switch (step, event) {
         case (.idle, .chooseDestination(let place)):
@@ -69,7 +85,13 @@ public struct DirectionsFlow<Place: Hashable & Sendable>: Sendable, Equatable {
             step = routes.first.map { .routes(routes, selected: $0.id) } ?? .noRoutes
         case (.routes(let routes, _), .selectRoute(let id)) where routes.contains(where: { $0.id == id }):
             step = .routes(routes, selected: id)
-        case (.idle, .back), (.idle, .cancel):
+        case (.routes(let routes, _), .startRoute(let id)):
+            if let route = routes.first(where: { $0.id == id }) { step = .navigating(route) }
+        case (.navigating(let route), .reachedEnd):
+            step = .arrived(route)
+        case (.arrived(let route), .leftEnd):
+            step = .navigating(route)
+        case (.idle, .back), (.idle, .cancel), (.navigating, .back), (.arrived, .back):
             break
         case (.originPrompt, .back), (_, .cancel):
             self = DirectionsFlow()

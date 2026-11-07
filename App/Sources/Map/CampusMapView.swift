@@ -10,6 +10,7 @@ struct CampusMapView: UIViewRepresentable {
         controller.onSelect = { [model] place in model.select(place) }
         controller.onPickerCoordinateChange = { [model] coordinate in model.pickerCoordinate = coordinate }
         controller.onAnchorChange = { [model] anchor in model.mapAnchor = anchor }
+        controller.onNavigationStatus = { [model] status, isAtEnd in model.updateNavigation(status, isAtEnd: isAtEnd) }
         return controller
     }
 
@@ -22,5 +23,6 @@ struct CampusMapView: UIViewRepresentable {
         controller.apply(selection: model.selection)
         controller.apply(cameraRequest: model.cameraRequest)
         controller.apply(routePreview: model.routePreview)
+        controller.apply(navigation: model.directions.activeRoute)
     }
 }

@@ -53,6 +53,12 @@ struct HomeView: View {
                     .padding(.top, model.activity == .directions ? Self.modePickerTopInDirections : Self.modePickerTop)
             }
         }
+        .overlay(alignment: .bottom) {
+            if model.activity == .navigating {
+                NavigationCard(model: model)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .overlay {
             if model.activity == .searching {
                 SearchPanel(model: model)

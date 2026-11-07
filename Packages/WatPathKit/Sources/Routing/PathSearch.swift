@@ -4,6 +4,8 @@ import CampusGeo
 struct Hop: Sendable {
     var edge: Int
     var isForward: Bool
+    /// Storeys of stairs on the way onto this edge.
+    var storeys = 0.0
 }
 
 /// The cheapest walk between two endpoints.
@@ -128,7 +130,7 @@ struct PathSearch {
         var state = arrivalState
         while back[state].state >= 0 {
             let step = back[state]
-            hops.append(Hop(edge: Int(step.via), isForward: step.isForward))
+            hops.append(Hop(edge: Int(step.via), isForward: step.isForward, storeys: Double(step.climbed)))
             climbed += Double(step.climbed)
             state = Int(step.state)
         }

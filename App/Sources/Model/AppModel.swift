@@ -27,6 +27,15 @@ final class AppModel {
         case pickingLocation
         /// The directions sheet is up: where are you, or which route.
         case directions
+        /// Scrubbing along a route.
+        case navigating
+    }
+
+    /// What's left of the route, as the navigation card shows it.
+    struct NavigationStatus: Equatable {
+        /// Meters.
+        var distanceRemaining: Double
+        var secondsRemaining: Double
     }
 
     /// The routes on the map, and which one is picked.
@@ -42,6 +51,7 @@ final class AppModel {
     private(set) var selection: Place?
     private var browsingActivity = Activity.browsing
     private(set) var directions = DirectionsFlow<Place>()
+    private(set) var navigationStatus: NavigationStatus?
     var mapMode = MapMode.street
     /// The camera moves to show this place; a new request (new id) per move.
     private(set) var cameraRequest: CameraRequest?
@@ -75,7 +85,12 @@ final class AppModel {
         case .pickingOriginInPath, .pickingOriginOnMap: .pickingLocation
         case .searchingOrigin: .searching
         case .originPrompt, .findingRoutes, .routes, .noRoutes: .directions
+        case .navigating, .arrived: .navigating
         }
+    }
+
+    var isAtEndOfRoute: Bool {
+        if case .arrived = directions.step { true } else { false }
     }
 
     var routePreview: RoutePreview? {
@@ -210,6 +225,20 @@ final class AppModel {
         directions.send(.selectRoute(id))
     }
 
+    /// Navigation happens on the Path Map, which steps aside by itself outdoors.
+    func startRoute(_ id: Route.ID) {
+        mapMode = .path
+        directions.send(.startRoute(id))
+    }
+
+    /// The map reports this as the walker moves, when anything on the card would change.
+    func updateNavigation(_ status: NavigationStatus, isAtEnd: Bool) {
+        navigationStatus = status
+        if isAtEnd != isAtEndOfRoute {
+            directions.send(isAtEnd ? .reachedEnd : .leftEnd)
+        }
+    }
+
     /// One step back: from the route list, that's asking where you are again.
     func backInDirections() {
         directions.send(.back)
@@ -217,6 +246,7 @@ final class AppModel {
 
     func endDirections() {
         directions.send(.cancel)
+        navigationStatus = nil
     }
 
     private func isInsideABuilding(_ coordinate: GeoCoordinate) -> Bool {

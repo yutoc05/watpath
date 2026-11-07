@@ -1,6 +1,6 @@
 # WatPath: Project Plan
 
-*Status: Street Map, Path Map and routing work. Scrub navigation is next, and the door survey is still to do · Last updated 2026-11-06*
+*Status: Street Map, Path Map, routing and scrub navigation work. Polish is next, and the door survey is still to do · Last updated 2026-11-07*
 
 WatPath is an iPhone app for getting around the University of Waterloo main campus while staying indoors. It's closely modeled on *Toronto PATH Navigation* (Area 43 Labs). It has two map modes that share one camera, so switching between them feels like x-ray vision:
 
@@ -93,14 +93,15 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 - [x] Selecting a route previews it on both maps, with the camera framing the whole route. Door markers step aside while a route is on show.
 - [x] The routes scroll inside the card under a fixed header, so the map stays in view.
 - [x] The search bar is gone throughout directions, so the Street/Path toggle moves up into its place, and returns when directions end.
-- [ ] A **Start** button on each route, with navigation.
+- [x] A **Start** button on each route.
 
 ### 3.6 Navigation (scrub mode)
-- [ ] Start zooms the Path Map to the route start, with the route drawn as a dotted blue line.
-- [ ] A vertical drag anywhere scrubs along the route: drag **down = forward**, drag **up = back**, with flick momentum. The camera follows the route exactly through turns. The user never has to move the camera by hand.
-- [ ] Top progress bar: a walking-person icon moves toward a green flag.
-- [ ] Bottom ETA card: arrival time, minutes and distance remaining, an End button.
-- [ ] Holds 60 fps on iPhone 12.
+- [x] Start flies to the route start on the Path Map, with the route drawn as a dotted blue line and a green flag at its end.
+- [x] A vertical drag anywhere scrubs along the route: drag **down = forward**, drag **up = back**, with flick momentum. The camera follows the route through turns. The user never has to move the camera by hand, and can't: the map's own gestures are off.
+- [x] Top progress bar: a walking-person icon moves toward a green flag.
+- [x] Bottom ETA card: arrival time, minutes and distance remaining, an End button. At the end of the route it says you've arrived, until you scrub back.
+- [x] Outdoor stretches of 12 m or more fade to the Street Map, and back.
+- [x] Holds 60 fps on iPhone 12: 2.5 ms of hitches per second, indoors and out ([ADR-004](adr/004-navigation.md)).
 
 ## 4. Architecture
 
@@ -136,7 +137,7 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 | `CampusGeo` | `MapPlane`, MapKit camera model, `GroundProjection`, polygon geometry. Runs on Linux, so CI is cheap. |
 | `CampusModel` | Data types and bundle decoding. Runs on Linux. |
 | `CampusSearch` | Local index and typo-tolerant ranking. |
-| `Routing` | Walking graph, floor-aware search, snapping, route lists, `DirectionsFlow`. Runs on Linux, heavily tested. |
+| `Routing` | Walking graph, floor-aware search, snapping, route lists, `DirectionsFlow`, and navigation's `NavigationRig`. Runs on Linux, heavily tested. |
 | App target | SwiftUI features, `CampusMapController`, `PathMapView`. |
 
 **`DirectionsFlow`** is an explicit, unit-tested state machine. It's generic over the place type, so it runs without a screen:
@@ -145,9 +146,8 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 idle → originPrompt → pickingOriginInPath ─────────┐
                     → searchingOrigin ─────────────┤→ findingRoutes → routes | noRoutes
                         → pickingOriginOnMap ──────┘
+routes → navigating ⇄ arrived
 ```
-
-Navigation will add `navigating → arrived`.
 
 **Performance budget (iPhone 12):**
 
@@ -158,7 +158,7 @@ Navigation will add `navigating → arrived`.
 | Memory | ≤ 400 MB |
 | App size | ≤ ~80 MB. Photos dominate: resize to 1600 px HEIC plus thumbnails. |
 
-Measure on the phone, with Instruments' Animation Hitches as well as app timers: the render server's cost doesn't show up in the app ([ADR-002](adr/002-flat-path-map.md)).
+Measure on the phone, with Instruments' Animation Hitches as well as app timers: the render server's cost doesn't show up in the app ([ADR-002](adr/002-flat-path-map.md)). Keep recordings few, and let each one finish saving, which can take over a minute: they leave data on the phone, and filled its storage twice.
 
 ## 5. Data
 
@@ -229,14 +229,18 @@ The decisions, and why, are in [ADR-003](adr/003-routing.md).
 - **Metrics:** totals of distance, time, inside and outside length are summed along the walk, including the stretch from a pin to the graph. % inside = inside / total distance.
 - **Tests:** small hand-built graphs with known answers, and checks on the real campus that re-run on every data change: every building reaches every other, every door is reachable, no listed route is beaten on both measures, the first route is truly the fastest, and the routes along the main spine stay indoors.
 
-## 7. Navigation (Phase 4)
+## 7. Navigation
 
-- **The route:** a polyline P(s), where s is the distance in meters along it. The dotted line follows P exactly, drawn in `PathMapView` like the other lines. The camera follows a smoothed copy (centripetal Catmull-Rom spline), so its path never has sharp corners.
-- **Drag input:** Δs = Δy·k(zoom), with drag down moving forward. Flicks keep moving with momentum that slows down like `UIScrollView`. s is clamped to [0, L].
-- **Camera aim:** `target = P̃(s)`. The camera faces the direction of `P̃(s+8 m) − P̃(s−4 m)`, eased with a critically-damped spring (≈ 6 rad/s) so corners never snap.
-- **Camera position:** pitch fixed at about 50°, distance about 35 m, both easily tweaked. MapKit's closest zoom may hold this further out ([ADR-001](adr/001-camera-architecture.md)).
-- **Progress and ETA:** progress = s/L. Time remaining comes from the time model at s. Arrival = now + time remaining.
-- **Outdoor stretches:** the Path Map fades to reveal Apple Maps underneath. That's free because the camera is shared.
+The decisions, and why, are in [ADR-004](adr/004-navigation.md). All of this but the drawing is plain values in `Routing` (`NavigationRig`), tested without a screen. Every constant lives in `NavigationTuning`.
+
+- **The route:** `RouteTrack` turns a distance s along the route into a spot on the map. The dotted line follows the route exactly. The camera follows a rounded copy (a centripetal Catmull-Rom spline through points 6 m apart), read by step and not by length, so the two can't drift apart.
+- **The dots** are placed every 3.5 m on the ground and projected each frame, so they stay put as the camera moves. A dash pattern would slide along the line.
+- **Drag input:** Δs = Δy·k, where k is the ground the finger drags past the walker times a gain of 1.5, with drag down moving forward. Flicks coast and slow down as a `UIScrollView` does, up to 150 m/s, and a finger coming down catches them. s is clamped to [0, L].
+- **Camera aim:** the walker stays 60% of the way down the screen. The camera faces the direction of `P̃(s+8 m) − P̃(s−4 m)`, eased with a critically damped spring (6 rad/s), so corners never snap.
+- **Camera position:** pitch 50° and distance 130 m. MapKit won't come closer than about 88 m ([ADR-001](adr/001-camera-architecture.md)).
+- **Progress and ETA:** progress = s/L. Each stretch of the route knows how long it takes, including its doors and stairs, so time remaining comes from the time model at s. Arrival = now + time remaining.
+- **Outdoor stretches:** the Path Map fades to reveal Apple Maps underneath. That's free because the camera is shared. MapKit sleeps while nobody can see it, and wakes 60 m before a stretch.
+- **Tests:** the track, motion, spring, flight and rig each have unit tests, and the flow has UI tests. Real walks check that the camera never falls behind the walker.
 
 ## 8. Repository and practices
 
@@ -268,7 +272,7 @@ watpath/
 | **Path Map** ✅ | Compiler, flat Path Map, lines, floor numbers, labels, cross-fade | Switch modes anywhere on campus without the camera moving |
 | **Routing** ✅ | Footpaths, graph, `Routing` package and tests, DirectionsFlow, both origin flows, route list | Any door or building to any other gives plausible, distinct routes with correct metrics |
 | **Survey** | Tier 1 for all 38 (`docs/survey.md`), then line fixes. Runs alongside the rest, on site | Every door and connection verified |
-| **Navigation** | Scrub gesture and momentum, camera rig, dotted route, progress bar, ETA card, arrival | 60 fps scrub along a route through 3 or more buildings: **app complete end-to-end** |
+| **Navigation** ✅ | Scrub gesture and momentum, camera rig, dotted route, progress bar, ETA card, arrival | 60 fps scrub along a route through 3 or more buildings: **app complete end-to-end** |
 | **Polish** | Animations, haptics, empty/error/permission states, onboarding, app icon, accessibility audit, performance pass, demo video | No known crashes; meets the performance budget; demo video recorded |
 
 ## 10. Risks

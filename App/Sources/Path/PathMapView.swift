@@ -153,6 +153,9 @@ final class PathMapView: UIView {
             .min { $0.1 < $1.1 }?.0
     }
 
+    /// Door markers step aside while navigating, as they do for a route preview.
+    var hidesDoors = false
+
     /// The routes to draw: the picked one over the others.
     func show(route: Route?, alternatives: [Route], plane: MapPlane) {
         selectedLine = route?.points.map(plane.planar) ?? []
@@ -256,7 +259,7 @@ final class PathMapView: UIView {
         }
 
         // Doors last: like Apple Maps' markers, they give way to labels and to each other.
-        let showDoors = distance < Self.doorsVisibleBelowDistance && selectedLine.isEmpty
+        let showDoors = distance < Self.doorsVisibleBelowDistance && selectedLine.isEmpty && !hidesDoors
         for (door, point, marker) in doorMarkers where door.id != selectedDoor {
             marker.isSelectedMarker = false
             guard showDoors, let screen = projector.project(SIMD3(point.x, point.y, 0)) else {

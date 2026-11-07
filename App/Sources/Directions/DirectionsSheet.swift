@@ -137,6 +137,8 @@ private struct RouteList: View {
                     ForEach(routes) { route in
                         RouteRow(route: route, isSelected: route.id == selected) {
                             model.selectRoute(route.id)
+                        } start: {
+                            model.startRoute(route.id)
                         }
                     }
                 }
@@ -154,12 +156,16 @@ private struct RouteList: View {
 }
 
 private struct RouteRow: View {
+    /// Room on the row's last lines for the Start button.
+    private static let startButtonWidth = 84.0
+
     let route: Route
     let isSelected: Bool
-    let action: () -> Void
+    let select: () -> Void
+    let start: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: select) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(route.label.rawValue).font(.headline)
@@ -173,15 +179,15 @@ private struct RouteRow: View {
                     Text(Route.distanceText(route.distance)).monospacedDigit()
                 }
                 .font(.subheadline)
-                Text("Inside \(Route.distanceText(route.insideLength)) · Outside \(Route.distanceText(route.outsideLength))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                if !route.detailText.isEmpty {
-                    Text(route.detailText)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Inside \(Route.distanceText(route.insideLength)) · Outside \(Route.distanceText(route.outsideLength))")
+                    if !route.detailText.isEmpty {
+                        Text(route.detailText).lineLimit(1)
+                    }
                 }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.trailing, Self.startButtonWidth)
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -198,6 +204,13 @@ private struct RouteRow: View {
         .accessibilityLabel(route.accessibilityText)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("route-\(route.id)")
+        .overlay(alignment: .bottomTrailing) {
+            Button("Start", action: start)
+                .buttonStyle(.glassProminent)
+                .accessibilityIdentifier("start-\(route.id)")
+                .accessibilityLabel("Start \(route.label.rawValue)")
+                .padding(12)
+        }
     }
 }
 
