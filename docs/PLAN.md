@@ -96,9 +96,10 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 - [x] A **Start** button on each route.
 
 ### 3.6 Navigation (scrub mode)
-- [x] Start flies to the route start on the Path Map, with the route drawn as a dotted blue line and a green flag at its end.
+- [x] Start flies to the route start on the Path Map, with the route drawn as a dotted blue line, a Canada goose standing on it, and a green flag at its end.
 - [x] A vertical drag anywhere scrubs along the route: drag **down = forward**, drag **up = back**, with flick momentum. The camera follows the route through turns. The user never has to move the camera by hand, and can't: the map's own gestures are off.
-- [x] Top progress bar: a walking-person icon moves toward a green flag.
+- [x] A horizontal drag turns the camera around the goose, and a pinch zooms, with the goose staying put on screen. A drag does one or the other, settled by which way it first moves. Lifting the finger swings the camera back to straight ahead, carrying on first if the turn was flicked.
+- [x] Top progress bar: a goose moves toward a green flag.
 - [x] Bottom ETA card: arrival time, minutes and distance remaining, an End button. At the end of the route it says you've arrived, until you scrub back.
 - [x] Outdoor stretches of 12 m or more fade to the Street Map, and back.
 - [x] Holds 60 fps on iPhone 12: 2.5 ms of hitches per second, indoors and out ([ADR-004](adr/004-navigation.md)).
@@ -236,8 +237,8 @@ The decisions, and why, are in [ADR-004](adr/004-navigation.md). All of this but
 - **The route:** `RouteTrack` turns a distance s along the route into a spot on the map. The dotted line follows the route exactly. The camera follows a rounded copy (a centripetal Catmull-Rom spline through points 6 m apart), read by step and not by length, so the two can't drift apart.
 - **The dots** are placed every 3.5 m on the ground and projected each frame, so they stay put as the camera moves. A dash pattern would slide along the line.
 - **Drag input:** Δs = Δy·k, where k is the ground the finger drags past the walker times a gain of 1.5, with drag down moving forward. Flicks coast and slow down as a `UIScrollView` does, up to 150 m/s, and a finger coming down catches them. s is clamped to [0, L].
-- **Camera aim:** the walker stays 60% of the way down the screen. The camera faces the direction of `P̃(s+8 m) − P̃(s−4 m)`, eased with a critically damped spring (6 rad/s), so corners never snap.
-- **Camera position:** pitch 50° and distance 130 m. MapKit won't come closer than about 88 m ([ADR-001](adr/001-camera-architecture.md)).
+- **Camera aim:** the walker stays 60% of the way down the screen. The camera faces the direction of `P̃(s+8 m) − P̃(s−4 m)`, eased with a critically damped spring (6 rad/s), so corners never snap. A user's turn sits on top of that, on a slower spring (4 rad/s) that takes over from the finger's speed when it lifts.
+- **Camera position:** pitch 70° and distance 130 m. MapKit's long lens flattens perspective, so that looks less steep than it sounds. A pinch moves the camera between 90 m, near MapKit's closest ([ADR-001](adr/001-camera-architecture.md)), and 600 m, past which MapKit flattens steep pitches by itself.
 - **Progress and ETA:** progress = s/L. Each stretch of the route knows how long it takes, including its doors and stairs, so time remaining comes from the time model at s. Arrival = now + time remaining.
 - **Outdoor stretches:** the Path Map fades to reveal Apple Maps underneath. That's free because the camera is shared. MapKit sleeps while nobody can see it, and wakes 60 m before a stretch.
 - **Tests:** the track, motion, spring, flight and rig each have unit tests, and the flow has UI tests. Real walks check that the camera never falls behind the walker.

@@ -186,6 +186,51 @@ final class NavigationFlowTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["placeTitle"].waitForExistence(timeout: 5))
     }
 
+    @MainActor
+    func testADragAcrossTurnsTheCameraWithoutWalking() {
+        launch()
+        openRoutes(to: ("e5", "Engineering 5"), from: ("slc", "Student Life Centre"))
+        startRoute(3)
+        drag(from: 0.25, to: 0.7)
+        let walked = progress
+        XCTAssertGreaterThan(walked, 0)
+        let before = app.screenshot().pngRepresentation
+
+        let left = app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.45))
+        left.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.45)), withVelocity: .slow, thenHoldForDuration: 0)
+        XCTAssertNotEqual(app.screenshot().pngRepresentation, before, "the camera didn't turn")
+        save("nav-turning")
+        XCTAssertEqual(progress, walked, "turning walked along the route")
+
+        // Lifting the finger brings it back to straight ahead, by itself.
+        sleep(3)
+        XCTAssertEqual(progress, walked)
+        save("nav-straightened")
+
+        // Vertical drags still walk.
+        drag(from: 0.25, to: 0.7)
+        XCTAssertGreaterThan(progress, walked)
+    }
+
+    @MainActor
+    func testAPinchZoomsWithoutWalking() {
+        launch()
+        openRoutes(to: ("e5", "Engineering 5"), from: ("slc", "Student Life Centre"))
+        startRoute(3)
+        drag(from: 0.25, to: 0.7)
+        let walked = progress
+        let before = app.screenshot().pngRepresentation
+        // Spreading, because the fingers of a pinch that closes start wide apart: here,
+        // on the card along the bottom and on its End button.
+        app.pinch(withScale: 2, velocity: 1)
+        sleep(1)
+        XCTAssertEqual(progress, walked, "pinching walked along the route")
+        XCTAssertNotEqual(app.screenshot().pngRepresentation, before, "the camera didn't zoom")
+        save("nav-zoomed-in")
+        drag(from: 0.25, to: 0.7)
+        XCTAssertGreaterThan(progress, walked)
+    }
+
     /// The fastest way from SLC to E5 is mostly outside, so it must leave the Path Map.
     @MainActor
     func testAnOutdoorStretchShowsTheStreetMap() {

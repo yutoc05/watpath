@@ -16,6 +16,8 @@ public struct NavigationRig: Sendable {
         public var aim: SIMD2<Double>
         /// Degrees clockwise from north.
         public var heading: Double
+        /// Meters.
+        public var cameraDistance: Double
         /// True on an outdoor stretch long enough to show the Street Map.
         public var isOutside: Bool
         public var distanceRemaining: Double
@@ -27,6 +29,11 @@ public struct NavigationRig: Sendable {
     public let tuning: NavigationTuning
     public private(set) var motion: ScrubMotion
     private var heading: HeadingSpring
+    /// How far the user has turned the camera from the way the route runs. The finger
+    /// holds it, and once that lifts the spring brings it back to straight ahead.
+    private var turned: HeadingSpring
+    private var isTurning = false
+    private var cameraDistance: Double
 
     public init(route: Route, plane: MapPlane, tuning: NavigationTuning = .standard) {
         self.route = route
@@ -34,6 +41,8 @@ public struct NavigationRig: Sendable {
         track = RouteTrack(route: route, plane: plane, tuning: tuning)
         motion = ScrubMotion(length: track.length, tuning: tuning)
         heading = HeadingSpring(angle: track.facing(at: 0), stiffness: tuning.headingRate)
+        turned = HeadingSpring(angle: 0, stiffness: tuning.turnReturnRate)
+        cameraDistance = tuning.cameraDistance
     }
 
     public var isAtEnd: Bool { motion.isAtEnd }
@@ -45,7 +54,8 @@ public struct NavigationRig: Sendable {
             progress: track.length > 0 ? distance / track.length : 1,
             walker: track.point(at: distance),
             aim: track.aim(at: distance),
-            heading: heading.angle * 180 / .pi,
+            heading: (heading.angle + turned.angle) * 180 / .pi,
+            cameraDistance: cameraDistance,
             isOutside: track.isOutside(at: distance),
             distanceRemaining: track.length - distance,
             secondsRemaining: route.secondsRemaining(at: distance)
@@ -64,10 +74,33 @@ public struct NavigationRig: Sendable {
         motion.hold()
     }
 
+    /// Pinches the camera toward the walker, or away below 1. The walker stays put on
+    /// screen: this only changes how far away the camera looks from.
+    public mutating func zoom(by scale: Double) {
+        guard scale > 0 else { return }
+        cameraDistance = min(max(cameraDistance / scale, tuning.closestCameraDistance), tuning.farthestCameraDistance)
+    }
+
+    /// Turns the camera around the walker, without moving the walker, one to one with
+    /// the finger until `releaseTurn`.
+    public mutating func turn(byDegrees degrees: Double) {
+        isTurning = true
+        turned.move(by: degrees * .pi / 180)
+    }
+
+    /// The finger lifted, moving at `degreesPerSecond`. A flick coasts on and slows, as a
+    /// walk does, then the camera swings back to straight ahead.
+    public mutating func releaseTurn(degreesPerSecond rate: Double) {
+        isTurning = false
+        let top = tuning.turnFlickTopRate
+        turned.release(rate: min(max(rate, -top), top) * .pi / 180)
+    }
+
     /// Moves everything on by a frame.
     public mutating func advance(seconds: Double) {
         motion.advance(seconds: seconds)
         heading.advance(toward: track.facing(at: motion.position), seconds: seconds)
+        if !isTurning { turned.advance(toward: 0, seconds: seconds) }
     }
 }
 

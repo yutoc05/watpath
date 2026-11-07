@@ -16,6 +16,18 @@ public struct HeadingSpring: Sendable, Equatable {
         self.stiffness = stiffness
     }
 
+    /// Moves it by hand, from a standstill.
+    public mutating func move(by angle: Double) {
+        self.angle = Self.wrapped(self.angle + angle)
+        rate = 0
+    }
+
+    /// Lets go at `rate` radians per second. Heading away from the target, it carries on,
+    /// slows and comes back. At no speed at all, it eases out, gathers pace and settles.
+    public mutating func release(rate: Double) {
+        self.rate = rate
+    }
+
     public mutating func advance(toward target: Double, seconds: Double) {
         // Always the short way around: 350° to 10° is 20°, not 340°.
         let offset = Self.wrapped(angle - target)

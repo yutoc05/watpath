@@ -351,6 +351,118 @@ struct NavigationRigTests {
         #expect(abs(rig.pose.heading - 90) < 1)
     }
 
+    @Test func pinchingChangesTheCameraDistanceAndNothingElse() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.drag(by: 50)
+        let before = rig.pose
+        rig.zoom(by: 2)
+        #expect(rig.pose.cameraDistance == before.cameraDistance / 2 || rig.pose.cameraDistance == NavigationTuning.standard.closestCameraDistance)
+        #expect(rig.pose.distance == before.distance)
+        #expect(rig.pose.walker == before.walker && rig.pose.aim == before.aim)
+        #expect(rig.pose.heading == before.heading)
+    }
+
+    @Test func pinchingStopsAtTheClosestAndFarthestDistances() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.zoom(by: 1_000)
+        #expect(rig.pose.cameraDistance == NavigationTuning.standard.closestCameraDistance)
+        rig.zoom(by: 0.001)
+        #expect(rig.pose.cameraDistance == NavigationTuning.standard.farthestCameraDistance)
+        rig.zoom(by: 0)
+        #expect(rig.pose.cameraDistance == NavigationTuning.standard.farthestCameraDistance)
+    }
+
+    @Test func turningMovesTheCameraAndNotTheWalker() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.drag(by: 50)
+        let before = rig.pose
+        rig.turn(byDegrees: 30)
+        #expect(abs(rig.pose.heading - before.heading - 30) < 1e-9)
+        #expect(rig.pose.distance == before.distance)
+        #expect(rig.pose.walker == before.walker)
+    }
+
+    /// Steps `rig` a frame at a time, returning its heading after each.
+    private func headings(_ rig: inout NavigationRig, frames: Int) -> [Double] {
+        (0..<frames).map { _ in
+            rig.advance(seconds: 1.0 / 60)
+            return rig.pose.heading
+        }
+    }
+
+    @Test func aHeldTurnStaysWhileTheRouteTurnsUnderneath() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.turn(byDegrees: 30)
+        rig.drag(by: 150)
+        _ = headings(&rig, frames: 240)
+        #expect(abs(rig.pose.heading - 120) < 1)  // the route runs east now, plus the turn
+    }
+
+    @Test func liftingTheFingerStraightensTheCameraWithoutWalking() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.drag(by: 50)
+        let walked = rig.pose.distance
+        rig.turn(byDegrees: 60)
+        rig.releaseTurn(degreesPerSecond: 0)
+        _ = headings(&rig, frames: 240)
+        #expect(abs(rig.pose.heading) < 0.1)
+        #expect(rig.pose.distance == walked)
+    }
+
+    /// Eases out from a standstill, gathers pace, then slows into place, with no snap.
+    @Test func straighteningSpeedsUpAndSlowsDownSmoothly() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.turn(byDegrees: 90)
+        rig.releaseTurn(degreesPerSecond: 0)
+        let angles = [90.0] + headings(&rig, frames: 180)
+        let speeds = zip(angles, angles.dropFirst()).map { $0 - $1 }
+        let fastest = speeds.firstIndex(of: speeds.max() ?? 0) ?? 0
+        #expect(fastest > 3 && fastest < 60)
+        #expect(speeds[0] < speeds[fastest] / 2)
+        for (a, b) in zip(speeds[..<fastest], speeds[1...fastest]) { #expect(a <= b + 1e-9) }
+        for (a, b) in zip(speeds[fastest...], speeds[(fastest + 1)...]) { #expect(a >= b - 1e-9) }
+        #expect(angles.allSatisfy { $0 >= -1e-6 })  // and it doesn't swing past straight
+    }
+
+    @Test func aFlickedTurnCoastsOnBeforeComingBack() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.turn(byDegrees: 10)
+        rig.releaseTurn(degreesPerSecond: 200)
+        let angles = headings(&rig, frames: 240)
+        #expect((angles.max() ?? 0) > 25)  // from the 10° the finger let go at
+        #expect(abs(rig.pose.heading) < 1)
+    }
+
+    @Test func aHardFlickIsCapped() {
+        func furthest(_ rate: Double) -> Double {
+            var rig = NavigationRig(route: corner, plane: plane)
+            rig.turn(byDegrees: 1)
+            rig.releaseTurn(degreesPerSecond: rate)
+            return headings(&rig, frames: 120).max() ?? 0
+        }
+        #expect(furthest(50_000) == furthest(NavigationTuning.standard.turnFlickTopRate))
+    }
+
+    @Test func aFingerTakesBackAReturningTurn() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.turn(byDegrees: 60)
+        rig.releaseTurn(degreesPerSecond: 0)
+        _ = headings(&rig, frames: 30)
+        let partway = rig.pose.heading
+        #expect(partway < 60 && partway > 0)
+        rig.turn(byDegrees: 5)
+        _ = headings(&rig, frames: 60)
+        #expect(abs(rig.pose.heading - partway - 5) < 1e-6)  // held, however long it waits
+    }
+
+    @Test func aTurnPastHalfwayComesBackTheShortWay() {
+        var rig = NavigationRig(route: corner, plane: plane)
+        rig.turn(byDegrees: 300)
+        rig.releaseTurn(degreesPerSecond: 0)
+        _ = headings(&rig, frames: 240)
+        #expect(abs(rig.pose.heading) < 0.2)
+    }
+
     @Test func reachingTheEndIsArrival() {
         var rig = NavigationRig(route: corner, plane: plane)
         rig.drag(by: 500)

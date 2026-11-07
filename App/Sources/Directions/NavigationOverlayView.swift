@@ -2,15 +2,18 @@ import CampusGeo
 import Routing
 import UIKit
 
-/// What navigation draws over either map: the dotted route, the walker, and the progress
+/// What navigation draws over either map: the dotted route, the goose, and the progress
 /// bar. It sits above both maps, so it looks the same on each and MapKit's 3D buildings
 /// can't dim it, and it never takes touches, so a drag anywhere reaches the map below.
 final class NavigationOverlayView: UIView {
     private static let dotSize = 6.5
+    private static let gooseSize = CGSize(width: 58, height: 56)
+    /// One more dot is skipped for each time the camera is this many meters farther out.
+    private static let metersPerDotSkipped = 130.0
 
     private let upcoming = CAShapeLayer()
     private let passed = CAShapeLayer()
-    private let walker = UIView(frame: CGRect(x: 0, y: 0, width: 24, height: 24))
+    private let walker = UIImageView(image: UIImage(named: "Goose"))
     private let flag = UIImageView(image: UIImage(systemName: "flag.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .semibold)))
     private let progressBar = NavigationProgressBar()
     private var dots: [(distance: Double, point: SIMD2<Double>)] = []
@@ -31,10 +34,10 @@ final class NavigationOverlayView: UIView {
         // The foot of the flag's pole marks the spot.
         flag.layer.anchorPoint = CGPoint(x: 0.1, y: 0.95)
         addSubview(flag)
-        walker.backgroundColor = PathMapView.routeColor
-        walker.layer.cornerRadius = 12
-        walker.layer.borderColor = UIColor.white.cgColor
-        walker.layer.borderWidth = 4
+        walker.bounds.size = Self.gooseSize
+        walker.contentMode = .scaleAspectFit
+        // It stands on the route: the spot is between its feet, not in its middle.
+        walker.layer.anchorPoint = CGPoint(x: 0.43, y: 0.89)
         addSubview(walker)
 
         progressBar.translatesAutoresizingMaskIntoConstraints = false
@@ -71,7 +74,8 @@ final class NavigationOverlayView: UIView {
 
         let ahead = CGMutablePath(), behind = CGMutablePath()
         let visible = bounds.insetBy(dx: -Self.dotSize, dy: -Self.dotSize)
-        for dot in dots {
+        for index in stride(from: 0, to: dots.count, by: max(1, Int(pose.cameraDistance / Self.metersPerDotSkipped))) {
+            let dot = dots[index]
             guard let screen = projector.project(SIMD3(dot.point.x, dot.point.y, 0)) else { continue }
             let point = CGPoint(x: screen.x, y: screen.y)
             guard visible.contains(point) else { continue }
@@ -85,7 +89,7 @@ final class NavigationOverlayView: UIView {
 
         if let screen = projector.project(SIMD3(pose.walker.x, pose.walker.y, 0)) {
             walker.isHidden = false
-            walker.center = CGPoint(x: screen.x, y: screen.y)
+            walker.layer.position = CGPoint(x: screen.x, y: screen.y)
         } else {
             walker.isHidden = true
         }
@@ -99,17 +103,18 @@ final class NavigationOverlayView: UIView {
     }
 }
 
-/// A walking figure moving along a track toward a green flag.
+/// A goose moving along a track toward a green flag.
 private final class NavigationProgressBar: UIView {
     private static let inset = 20.0
     /// The figure stops this far short of the flag, rather than standing on it.
-    private static let flagClearance = 26.0
+    private static let flagClearance = 34.0
+    private static let gooseSize = CGSize(width: 33, height: 32)
 
     private let background = UIVisualEffectView(effect: UIGlassEffect())
     private let track = CALayer()
     private let fill = CALayer()
     private let flag = UIImageView(image: UIImage(systemName: "flag.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)))
-    private let figure = UIImageView(image: UIImage(systemName: "figure.walk", withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)))
+    private let figure = UIImageView(image: UIImage(named: "Goose"))
     private var shownPercent = -1
 
     var progress = 0.0 {
@@ -128,7 +133,8 @@ private final class NavigationProgressBar: UIView {
         layer.addSublayer(track)
         layer.addSublayer(fill)
         flag.tintColor = .systemGreen
-        figure.tintColor = PathMapView.routeColor
+        figure.bounds.size = Self.gooseSize
+        figure.contentMode = .scaleAspectFit
         addSubview(flag)
         addSubview(figure)
         isAccessibilityElement = true

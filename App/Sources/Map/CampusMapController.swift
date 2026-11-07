@@ -25,6 +25,8 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private static let pickingDistance = 700.0
     /// How close to look when the pin starts where the phone is.
     private static let hereDistance = 400.0
+    /// A finger held still this many seconds before lifting doesn't flick.
+    private static let flickPause = 0.1
     /// How far to look down on the destination when navigation ends.
     private static let arrivalDistance = 400.0
     /// Margin around a route shown whole, in points.
@@ -85,6 +87,17 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
     private let scrubPan = UIPanGestureRecognizer()
     /// A touch coming down, which catches a flick before any drag has started.
     private let scrubHold = UILongPressGestureRecognizer()
+    private let scrubPinch = UIPinchGestureRecognizer()
+    /// What the drag under way does, settled by which way it first moved, so a walk
+    /// doesn't wander into a turn when the finger drifts.
+    private var scrubAxis: ScrubAxis?
+    private var lastScrubMove: CFTimeInterval = 0
+    /// One finger of a pinch can register as a drag first, and lifting it mustn't flick.
+    private var touchIsPinch = false
+
+    private enum ScrubAxis {
+        case walk, turn
+    }
     private let pathPan = UIPanGestureRecognizer()
     /// While panning the Path Map: the map-plane point the finger is holding.
     private var pathPanAnchor: SIMD2<Double>?
@@ -163,9 +176,16 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
 
         scrubPan.addTarget(self, action: #selector(handleScrub))
         scrubPan.isEnabled = false
-        // On this view, not the map, which is hidden for much of a walk.
+        // On this view, not the map, which is hidden for much of a walk. That leaves this
+        // view taking the touches, and a plain view only gets the first finger of a pinch.
+        isMultipleTouchEnabled = true
+        scrubPan.maximumNumberOfTouches = 1
         scrubPan.delegate = self
         addGestureRecognizer(scrubPan)
+        scrubPinch.addTarget(self, action: #selector(handleScrubPinch))
+        scrubPinch.isEnabled = false
+        scrubPinch.delegate = self
+        addGestureRecognizer(scrubPinch)
         scrubHold.addTarget(self, action: #selector(handleScrubHold))
         scrubHold.minimumPressDuration = 0
         scrubHold.cancelsTouchesInView = false
@@ -282,6 +302,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         pathPan.isEnabled = !navigating && mode == .path
         scrubPan.isEnabled = navigating
         scrubHold.isEnabled = navigating
+        scrubPinch.isEnabled = navigating
     }
 
     private func clearHighlight() {
@@ -458,7 +479,7 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         var state = cameraState(
             drawing: pose.aim,
             at: SIMD2(Double(bounds.midX), Double(bounds.height) * rig.tuning.walkerHeight),
-            distance: rig.tuning.cameraDistance,
+            distance: pose.cameraDistance,
             heading: pose.heading,
             pitch: rig.tuning.pitch
         )
@@ -507,24 +528,54 @@ final class CampusMapController: UIView, MKMapViewDelegate, UIGestureRecognizerD
         return length(SIMD2(here.x - next.x, here.y - next.y)) * rig.tuning.dragGain
     }
 
-    /// A drag down walks forward, the way the ground would move past you. The flight to
-    /// the start isn't interrupted: the camera is about to land.
+    /// A drag down walks forward, the way the ground would move past you, and a drag
+    /// across turns the camera, with the world following the finger. The flight to the
+    /// start isn't interrupted: the camera is about to land.
     @objc private func handleScrub(_ recognizer: UIPanGestureRecognizer) {
-        guard flight == nil else { return recognizer.setTranslation(.zero, in: self) }
+        guard flight == nil, let rig else { return recognizer.setTranslation(.zero, in: self) }
+        let moved = recognizer.translation(in: self)
         let scale = scrubMetersPerPoint
         switch recognizer.state {
         case .changed:
-            rig?.drag(by: Double(recognizer.translation(in: self).y) * scale)
+            guard moved != .zero, !touchIsPinch else { return recognizer.setTranslation(.zero, in: self) }
+            lastScrubMove = CACurrentMediaTime()
+            let axis = scrubAxis ?? (abs(moved.x) > abs(moved.y) ? .turn : .walk)
+            scrubAxis = axis
+            switch axis {
+            case .walk: self.rig?.drag(by: Double(moved.y) * scale)
+            case .turn: self.rig?.turn(byDegrees: -Double(moved.x / bounds.width) * rig.tuning.turnDegreesPerScreen)
+            }
             recognizer.setTranslation(.zero, in: self)
         case .ended:
-            rig?.flick(metersPerSecond: Double(recognizer.velocity(in: self).y) * scale)
+            // A finger that stopped before lifting isn't a flick, whatever speed it last had.
+            let isMoving = CACurrentMediaTime() - lastScrubMove < Self.flickPause && !touchIsPinch
+            let speed = isMoving ? recognizer.velocity(in: self) : .zero
+            switch scrubAxis {
+            case .walk: if isMoving { self.rig?.flick(metersPerSecond: Double(speed.y) * scale) }
+            case .turn: self.rig?.releaseTurn(degreesPerSecond: -Double(speed.x / bounds.width) * rig.tuning.turnDegreesPerScreen)
+            case nil: break
+            }
+            scrubAxis = nil
+        case .cancelled, .failed:
+            if scrubAxis == .turn { self.rig?.releaseTurn(degreesPerSecond: 0) }
+            scrubAxis = nil
         default:
             break
         }
     }
 
+    /// Zooms around the walker, who stays where they are on screen.
+    @objc private func handleScrubPinch(_ recognizer: UIPinchGestureRecognizer) {
+        touchIsPinch = true
+        guard flight == nil, recognizer.state == .changed else { return }
+        rig?.zoom(by: Double(recognizer.scale))
+        recognizer.scale = 1
+    }
+
     @objc private func handleScrubHold(_ recognizer: UILongPressGestureRecognizer) {
-        if recognizer.state == .began { rig?.hold() }
+        guard recognizer.state == .began else { return }
+        rig?.hold()
+        touchIsPinch = false
     }
 
     // MARK: Framing

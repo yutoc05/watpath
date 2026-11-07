@@ -1,9 +1,22 @@
 /// How navigation feels. Every constant lives here, so it can be tweaked in one place.
 public struct NavigationTuning: Sendable {
-    /// Camera tilt, in degrees from straight down.
+    /// Camera tilt, in degrees from straight down. MapKit's lens is long, which flattens
+    /// perspective, so it looks less steep than the number suggests.
     public var pitch: Double
-    /// Camera distance in meters. MapKit won't come closer than about 88 m.
+    /// Camera distance in meters at the start.
     public var cameraDistance: Double
+    /// How close a pinch can bring the camera. MapKit won't come closer than about 88 m.
+    public var closestCameraDistance: Double
+    /// How far a pinch can take it. Past this MapKit flattens steep pitches by itself,
+    /// which would pull the Street Map out of line with what's drawn over it.
+    public var farthestCameraDistance: Double
+    /// Degrees the camera turns for a swipe across the whole width of the screen.
+    public var turnDegreesPerScreen: Double
+    /// How fast a turn swings back once the finger lifts, in radians per second. Lower
+    /// than `headingRate`, because this is a move to watch, not one to get out of the way.
+    public var turnReturnRate: Double
+    /// A flicked turn starts at no more than this many degrees per second.
+    public var turnFlickTopRate: Double
     /// Where the walker sits on the screen, from the top (0) to the bottom (1). Below
     /// the middle leaves more of the way ahead in view.
     public var walkerHeight: Double
@@ -37,8 +50,13 @@ public struct NavigationTuning: Sendable {
     public var dotSpacing: Double
 
     public static let standard = NavigationTuning(
-        pitch: 50,
+        pitch: 70,
         cameraDistance: 130,
+        closestCameraDistance: 90,
+        farthestCameraDistance: 600,
+        turnDegreesPerScreen: 180,
+        turnReturnRate: 4,
+        turnFlickTopRate: 360,
         walkerHeight: 0.6,
         lookBehind: 4,
         lookAhead: 8,

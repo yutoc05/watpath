@@ -15,7 +15,7 @@ Until now MapKit owned the camera ([ADR-001](001-camera-architecture.md)). Here 
 `NavigationRig` in the `Routing` package takes drags and flicks and gives back a `Pose` each frame: where the walker is, where the camera looks, and which way it faces. It knows nothing about MapKit or the screen, so all of it is tested without a device. Its parts are exact rather than stepped, so a dropped frame changes nothing:
 
 - **`ScrubMotion`:** a flick decays as a `UIScrollView`'s does, using the integral of the decay rather than adding it up frame by frame. It goes the same distance at any frame rate.
-- **`HeadingSpring`:** the closed-form solution of a critically damped spring, stable at any time step, always turning the short way around.
+- **`HeadingSpring`:** the closed-form solution of a critically damped spring, stable at any time step, always turning the short way around. It eases the camera through corners, and a second one brings a user's turn back: the finger's speed at the moment it lifts is the spring's starting speed, so a flick coasts and slows before the camera swings back.
 
 ### The camera follows a rounded route, by step
 
@@ -25,7 +25,7 @@ The spline is shorter than the route, since it cuts corners. Read by length, tha
 
 ### The overlay sits above both maps
 
-The dotted line, walker and progress bar are drawn in their own view, over the Path Map and Street Map alike. An `MKPolyline` would dim under MapKit's 3D buildings at this tilt ([ADR-002](002-flat-path-map.md)), and would vanish with the Street Map as it fades.
+The dotted line, goose and progress bar are drawn in their own view, over the Path Map and Street Map alike. An `MKPolyline` would dim under MapKit's 3D buildings at this tilt ([ADR-002](002-flat-path-map.md)), and would vanish with the Street Map as it fades.
 
 Dots are projected from fixed places on the ground, 3.5 m apart. A dash pattern is measured along the line on screen, so it would slide along the route as the camera moves.
 
@@ -50,5 +50,5 @@ Apple's guideline for smooth is under 5 ms of hitches per second. The worst mome
 
 - **The new numbers are one run each.** Runs of the same build varied a lot before this change, so a second pair would have been worth having, but each recording leaves data behind on the phone, and they filled its storage twice.
 - **A hard flick could outrun MapKit's 60 m head start**, and show the Street Map a moment before its tiles load. Fades hide most of that.
-- **The camera is ours during navigation**, so MapKit's limits are ours to keep. At 130 m and 50° it's inside them.
+- **The camera is ours during navigation**, so MapKit's limits are ours to keep. A pinch stops at 90 m and 600 m, which keeps a 70° pitch inside them.
 - **VoiceOver can't scrub yet**, and Reduce Motion doesn't shorten the flight to the start. Both belong to the polish pass.
