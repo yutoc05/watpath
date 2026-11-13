@@ -9,7 +9,8 @@ Switching between them is like x-ray vision. The full plan is in [docs/PLAN.md](
 
 ## Demo
 
-<!-- The video player goes on the line below. In GitHub's editor, drag docs/media/demo.mp4 onto it: GitHub uploads it and puts its link there. -->
+https://github.com/user-attachments/assets/cc8e9736-0298-4d1f-905a-2d964d2eb40f
+
 
 A one-minute tour, recorded in the Simulator: search, the Street and Path maps, directions from a pin inside MC, and walking the route to DC. The video is also in [docs/media/demo.mp4](docs/media/demo.mp4).
 
