@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath demo stage</title>
+<!-- The backdrop behind the phone in the demo video, 1920 x 1080. make_video.py puts the
+     recording inside the frame at PHONE in make_video.py; keep the two in step. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Quicksand:wght@700&display=block">
+<style>
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; }
+body { background: radial-gradient(900px 900px at 655px 540px, #2B2723, #1F1D1B 60%, #191715); position: relative; }
+.path { position: absolute; inset: 0; }
+.frame { position: absolute; left: 418px; top: 38px; width: 474px; height: 1004px; border-radius: 80px;
+  background: #0E0D0C; box-shadow: 0 0 0 2px #3A352F, 0 30px 80px rgb(0 0 0 / .55); }
+.lockup { position: absolute; left: 1010px; top: 936px; display: flex; align-items: center; gap: 18px; }
+.lockup svg { width: 64px; height: 64px; border-radius: 14px; }
+.lockup span { font: 700 40px/1 Quicksand, system-ui, sans-serif; color: #F3B33D; letter-spacing: -0.5px; }
+</style>
+</head>
+<body>
+<svg class="path" viewBox="0 0 1920 1080" aria-hidden="true"><path d="M-60 900C420 760 1100 900 1980 700" stroke="#FFF6E3" stroke-opacity=".07" stroke-width="54" stroke-linecap="round" fill="none"/></svg>
+<div class="frame"></div>
+<div class="lockup"><svg viewBox="0 0 1024 1024" aria-hidden="true"><image href="../../design/app-icon.svg" width="1024" height="1024"/></svg><span>WatPath</span></div>
+<script>window.ready = document.fonts.load('700 40px Quicksand').then(() => document.fonts.ready);</script>
+</body>
+</html>

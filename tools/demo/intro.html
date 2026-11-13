@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath intro</title>
+<!-- The demo video's opening, rendered frame by frame by tools/demo/render.mjs.
+     ?tagline=... sets the line under the name; ?still shows the last frame. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Quicksand:wght@700&display=block">
+<style>
+html, body { margin: 0; height: 100%; background: #1F1D1B; overflow: hidden; }
+svg { display: block; width: 100vw; height: 100vh; }
+.lock, .words, .tagline, .gold-walk, .gold-waddle { transform-box: fill-box; transform-origin: center; }
+.gold-waddle { transform-origin: 50% 100%; }
+@keyframes draw { 0% { stroke-dashoffset: 1; opacity: 0; } 1% { opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 1; } }
+@keyframes walk { from { transform: translateX(-760px); } }
+@keyframes waddle { 0% { transform: rotate(-6deg); } 20% { transform: rotate(6deg); } 40% { transform: rotate(-5deg); } 60% { transform: rotate(4deg); } 80% { transform: rotate(-2deg); } 100% { transform: none; } }
+@keyframes lock { 0%, 57% { transform: translateX(310px) scale(1.18); } 79%, 100% { transform: none; } }
+@keyframes words { 0%, 63% { opacity: 0; transform: translateX(-28px); } 83%, 100% { opacity: 1; transform: none; } }
+@keyframes tag { 0%, 72% { opacity: 0; } 92%, 100% { opacity: 1; } }
+.play .draw { stroke-dasharray: 1 2; }
+.play .gold-path { animation: draw 1s ease-out .1s both; }
+.play .gold-walk { animation: walk 1.4s cubic-bezier(.2, .7, .3, 1) .3s both; }
+.play .gold-waddle { animation: waddle 1.5s ease-in-out .3s both; }
+.play .lock { animation: lock 4.1s cubic-bezier(.6, 0, .2, 1) both; }
+.play .words { animation: words 4.1s cubic-bezier(.2, .7, .2, 1) both; }
+.play .tagline { animation: tag 4.1s ease-out both; }
+</style>
+</head>
+<body>
+<svg viewBox="0 0 1600 900" role="img" aria-label="WatPath">
+<defs><linearGradient id="gold-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F6BE4A"/><stop offset="1" stop-color="#ECA52C"/></linearGradient><clipPath id="tile-clip"><rect width="1024" height="1024" rx="230"/></clipPath><symbol id="goose" viewBox="-6 -6 136 132"><g fill="#fff" stroke="#fff" stroke-width="7" stroke-linejoin="round"><path d="M22 70 L7 58 L10 74 L24 84 Z"/><path d="M20 76 C19 58 39 49 58 51 C75 52 86 62 86 75 C86 90 66 97 47 97 C31 97 21 90 20 76 Z"/><path d="M20 76 C21 90 31 97 47 97 C38 93 30 86 27 77 Z"/><path d="M61 51 C77 53 87 63 86 77 C83 88 72 94 62 96 C72 81 70 64 61 51 Z"/><path d="M30 68 C43 57 61 60 67 71 C57 85 38 85 30 68 Z"/><path d="M39 94 h5 v11 l10 6 h-16 Z"/><path d="M60 94 h5 v11 l10 6 h-16 Z"/><path d="M66 63 C71 47 66 34 70 20 C72 11 85 11 87 20 C85 33 84 47 82 63 Z"/><ellipse cx="79" cy="17" rx="12" ry="10"/><path d="M89 12 L104 18 L89 23 Z"/><path d="M71 17 C73 11 81 12 81 19 C81 26 74 29 71 25 Z"/><circle cx="85" cy="14" r="1.9"/></g><path d="M22 70 L7 58 L10 74 L24 84 Z" fill="#1E1C1A"/><path d="M20 76 C19 58 39 49 58 51 C75 52 86 62 86 75 C86 90 66 97 47 97 C31 97 21 90 20 76 Z" fill="#8F7355"/><path d="M20 76 C21 90 31 97 47 97 C38 93 30 86 27 77 Z" fill="#FFFFFF"/><path d="M61 51 C77 53 87 63 86 77 C83 88 72 94 62 96 C72 81 70 64 61 51 Z" fill="#E2D5C3"/><path d="M30 68 C43 57 61 60 67 71 C57 85 38 85 30 68 Z" fill="#6C5540"/><path d="M39 94 h5 v11 l10 6 h-16 Z" fill="#2B2826"/><path d="M60 94 h5 v11 l10 6 h-16 Z" fill="#2B2826"/><path d="M66 63 C71 47 66 34 70 20 C72 11 85 11 87 20 C85 33 84 47 82 63 Z" fill="#1E1C1A"/><ellipse cx="79" cy="17" rx="12" ry="10" fill="#1E1C1A"/><path d="M89 12 L104 18 L89 23 Z" fill="#2B2826"/><path d="M71 17 C73 11 81 12 81 19 C81 26 74 29 71 25 Z" fill="#FFFFFF"/><circle cx="85" cy="14" r="1.9" fill="#FFFFFF"/></symbol></defs>
+<rect width="1600" height="900" fill="#1F1D1B"/>
+<g class="lock"><g transform="translate(300 270) scale(0.3515625)"><g clip-path="url(#tile-clip)"><rect width="1024" height="1024" fill="url(#gold-bg)"/><path class="draw gold-path" pathLength="1" d="M-40 850C260 770 620 860 1064 730" stroke="#FFF6E3" stroke-width="64" stroke-linecap="round" stroke-linejoin="round" fill="none"/><g class="gold-walk"><g class="gold-waddle"><use href="#goose" x="205" y="228" width="680" height="660"/></g></g></g></g></g>
+<g class="words">
+<text x="720" y="494" font-family="Quicksand, system-ui, sans-serif" font-weight="700" font-size="156" fill="#F3B33D" letter-spacing="-2">WatPath</text>
+<text class="tagline" x="726" y="572" font-family="Inter, system-ui, sans-serif" font-weight="500" font-size="40" fill="#CDBFA8">Every bridge. Every tunnel.</text>
+</g>
+</svg>
+<script>
+const params = new URLSearchParams(location.search);
+if (params.get('tagline')) document.querySelector('.tagline').textContent = params.get('tagline');
+// How long the animation runs, in seconds; the renderer asks.
+window.duration = 4.1;
+window.ready = document.fonts.load('700 156px Quicksand').then(() => document.fonts.load('500 40px Inter')).then(() => document.fonts.ready);
+if (!params.has('still')) {
+  document.querySelector('svg').classList.add('play');
+  void document.body.getBoundingClientRect();
+}
+window.seek = seconds => {
+  for (const animation of document.getAnimations()) {
+    animation.pause();
+    animation.currentTime = seconds * 1000;
+  }
+};
+</script>
+</body>
+</html>

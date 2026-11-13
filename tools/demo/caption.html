@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath demo caption</title>
+<!-- One feature's caption, beside the phone in the demo video. Rendered on a transparent
+     background: caption.html?title=Path%20Map&body=... -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@500&family=Quicksand:wght@700&display=block">
+<style>
+html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+.caption { position: absolute; left: 1010px; top: 50%; transform: translateY(-58%); max-width: 780px; }
+h1 { margin: 0 0 22px; font: 700 84px/1.05 Quicksand, system-ui, sans-serif; color: #F3B33D; letter-spacing: -1px; }
+p { margin: 0; font: 500 38px/1.35 Inter, system-ui, sans-serif; color: #FFF6E3; opacity: .86; text-wrap: balance; }
+</style>
+</head>
+<body>
+<div class="caption"><h1 id="title"></h1><p id="body"></p></div>
+<script>
+const params = new URLSearchParams(location.search);
+document.getElementById('title').textContent = params.get('title') ?? '';
+document.getElementById('body').textContent = params.get('body') ?? '';
+window.ready = Promise.all([document.fonts.load('700 84px Quicksand'), document.fonts.load('500 38px Inter')]).then(() => document.fonts.ready);
+</script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # WatPath: Project Plan
 
-*Status: Street Map, Path Map, routing and scrub navigation work. Polish is next, and the door survey is still to do · Last updated 2026-11-07*
+*Status: Street Map, Path Map, routing and scrub navigation work, and the app has its icon, colors and demo video. The rest of polish is next, and the door survey is still to do · Last updated 2026-11-13*
 
 WatPath is an iPhone app for getting around the University of Waterloo main campus while staying indoors. It's closely modeled on *Toronto PATH Navigation* (Area 43 Labs). It has two map modes that share one camera, so switching between them feels like x-ray vision:
 
@@ -96,13 +96,18 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 - [x] A **Start** button on each route.
 
 ### 3.6 Navigation (scrub mode)
-- [x] Start flies to the route start on the Path Map, with the route drawn as a dotted blue line, a Canada goose standing on it, and a green flag at its end.
+- [x] Start flies to the route start on the Path Map, with the route drawn as a dotted line in the accent color, a Canada goose standing on it, and a green flag at its end.
 - [x] A vertical drag anywhere scrubs along the route: drag **down = forward**, drag **up = back**, with flick momentum. The camera follows the route through turns. The user never has to move the camera by hand, and can't: the map's own gestures are off.
 - [x] A horizontal drag turns the camera around the goose, and a pinch zooms, with the goose staying put on screen. A drag does one or the other, settled by which way it first moves. Lifting the finger swings the camera back to straight ahead, carrying on first if the turn was flicked.
 - [x] Top progress bar: a goose moves toward a green flag.
 - [x] Bottom ETA card: arrival time, minutes and distance remaining, an End button. At the end of the route it says you've arrived, until you scrub back.
 - [x] Outdoor stretches of 12 m or more fade to the Street Map, and back.
 - [x] Holds 60 fps on iPhone 12: 2.5 ms of hitches per second, indoors and out ([ADR-004](adr/004-navigation.md)).
+
+### 3.7 Look and demo
+- [x] The app icon is the navigation goose on its path, on marigold. Its source is `design/app-icon.svg`. It was picked on 2026-11-13 from eight directions, with the wordmark in Quicksand.
+- [x] A honey accent (#B97300) on buttons, the picked route and the progress bar, with sand for routes not picked. The Path Map keeps its white, blue and red lines, and your location stays blue.
+- [x] A one-minute demo video in the README. A UI test (`AppUITests/DemoTour.swift`) plays the tour while the Simulator records, and `tools/demo` cuts it, trims the waits and adds the intro and captions (`make demo`). Debug builds draw a circle under each finger when launched with `-showTouches`, so the recording shows the gestures.
 
 ## 4. Architecture
 
@@ -255,8 +260,10 @@ watpath/
   data/                  # source data (ODbL); data/private/ gitignored
   tools/compiler/        # Python map compiler + tests
   tools/osm_import/      # OSM importer + tests
-  docs/                  # this plan, decision records, generated coverage and survey
-  Makefile               # make project · data · test · uitest · sim · device
+  tools/demo/            # records the walkthrough and cuts the demo video
+  design/                # app icon source
+  docs/                  # this plan, decision records, generated coverage and survey, demo video
+  Makefile               # make project · data · test · uitest · sim · device · demo
 ```
 
 - **Tests:** Swift Testing for packages, XCUITest for the main flows, pytest for the tools.
@@ -274,7 +281,7 @@ watpath/
 | **Routing** ✅ | Footpaths, graph, `Routing` package and tests, DirectionsFlow, both origin flows, route list | Any door or building to any other gives plausible, distinct routes with correct metrics |
 | **Survey** | Tier 1 for all 38 (`docs/survey.md`), then line fixes. Runs alongside the rest, on site | Every door and connection verified |
 | **Navigation** ✅ | Scrub gesture and momentum, camera rig, dotted route, progress bar, ETA card, arrival | 60 fps scrub along a route through 3 or more buildings: **app complete end-to-end** |
-| **Polish** | Animations, haptics, empty/error/permission states, onboarding, app icon, accessibility audit, performance pass, demo video | No known crashes; meets the performance budget; demo video recorded |
+| **Polish** | ✅ App icon, colors and demo video. Still to do: animations, haptics, empty/error/permission states, onboarding, accessibility audit, performance pass | No known crashes; meets the performance budget; demo video recorded |
 
 ## 10. Risks
 

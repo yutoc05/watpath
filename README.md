@@ -7,6 +7,10 @@ indoors. It has two map modes that share one camera:
 
 Switching between them is like x-ray vision. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
+[![A one-minute tour of WatPath: search, the Street and Path maps, directions from a pin inside MC, and walking the route to DC](docs/media/demo.gif)](docs/media/demo.mp4)
+
+A one-minute tour, recorded in the Simulator. Click it for the [full-quality video](docs/media/demo.mp4).
+
 **Status:** both maps and routing work:
 - Street Map: door markers, place cards, and search (typo-tolerant, with Recents and Popular).
 - Path Map: every building on one flat level, with thin lines for what's mapped.
@@ -33,6 +37,7 @@ make data      # compile data/ into build/CampusBundle
 make sim       # build and run in the Simulator
 make test      # Python + Swift unit tests
 make uitest    # UI flow tests in the Simulator
+make demo      # record the walkthrough and cut docs/media/demo.mp4
 ```
 
 
@@ -55,8 +60,9 @@ Free provisioning expires after 7 days. Run `make device` again to re-sign.
 | `Packages/WatPathKit/` | Platform-independent modules: `CampusGeo` (map projection, camera model, geometry), `CampusModel` (bundle types), `CampusSearch` (offline search, recents), `Routing` (walking graph, route search, directions flow, navigation) |
 | `AppUITests/` | UI flow tests |
 | `data/` | Map source data: hand-curated `campus/` and generated `osm/` |
-| `tools/` | OSM importer, map compiler, build and run scripts |
-| `docs/` | Plan, decision records, generated coverage report and survey checklist |
+| `tools/` | OSM importer, map compiler, build and run scripts, and `demo/`, which records and cuts the demo video |
+| `design/` | The app icon's source |
+| `docs/` | Plan, decision records, generated coverage report, survey checklist, and the demo video in `media/` |
 
 ## Data and licenses
 
