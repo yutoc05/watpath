@@ -56,7 +56,11 @@ struct PolygonGeometryTests {
         let clockwise: [SIMD2<Double>] = [SIMD2(0, 0), SIMD2(0, 10), SIMD2(10, 10), SIMD2(10, 0)]
         let counterClockwise = Array(clockwise.reversed())
         func isCounterClockwise(_ ring: [SIMD2<Double>]) -> Bool {
-            zip(ring, ring.dropFirst() + ring.prefix(1)).reduce(0) { $0 + $1.0.x * $1.1.y - $1.1.x * $1.0.y } > 0
+            var twiceArea = 0.0
+            for (a, b) in zip(ring, ring.dropFirst() + ring.prefix(1)) {
+                twiceArea += a.x * b.y - b.x * a.y
+            }
+            return twiceArea > 0
         }
         let wound = PolygonGeometry.wound(outline: clockwise, holes: [counterClockwise])
         #expect(isCounterClockwise(wound[0]) && !isCounterClockwise(wound[1]))
