@@ -5,10 +5,10 @@ Cuts the Simulator recording at the scenes DemoTour marked, sets it in a phone f
 the WatPath stage with a caption for each feature, and opens and closes on the intro
 (intro.html). Pages are drawn by render.mjs in headless Chrome; ffmpeg does the rest.
 
-    tools/demo/make_video.py [--tagline "Every bridge. Every tunnel."] [--out docs/media/demo.mp4] [--gif docs/media/demo.gif]
+    tools/demo/make_video.py [--tagline "Every bridge. Every tunnel."] [--out docs/media/demo.mp4]
 
-The GIF is the README's preview: GitHub plays animated images inline, but not videos
-committed to the repository.
+GitHub only plays a video in the README when it was uploaded through github.com, so after
+re-cutting, drag the new docs/media/demo.mp4 into the README in GitHub's editor.
 """
 import argparse
 import json
@@ -216,19 +216,10 @@ def finish(intro, main, outro, out):
            "-movflags", "+faststart", "-an", out)
 
 
-def make_gif(video, gif):
-    """A 12 fps, 960-wide copy that plays inline in the README."""
-    gif.parent.mkdir(parents=True, exist_ok=True)
-    ffmpeg("-i", video, "-vf", "fps=12,scale=960:-1:flags=lanczos,split[a][b];"
-           "[a]palettegen=max_colors=192:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
-           "-loop", "0", gif)
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tagline", default="Every bridge. Every tunnel.")
     parser.add_argument("--out", type=pathlib.Path, default=WORK / "watpath-demo.mp4")
-    parser.add_argument("--gif", type=pathlib.Path, help="also write the README's animated preview here")
     args = parser.parse_args()
     phone, spans = cut_phone(scene_times())
     stage, mask, captions = stage_and_captions(spans)
@@ -236,9 +227,6 @@ def main():
     intro, outro = intro_and_outro(args.tagline)
     finish(intro, main_clip, outro, args.out.resolve())
     print(f"{args.out}: {duration(args.out):.1f} s, {args.out.stat().st_size / 1e6:.1f} MB")
-    if args.gif:
-        make_gif(args.out.resolve(), args.gif.resolve())
-        print(f"{args.gif}: {args.gif.stat().st_size / 1e6:.1f} MB")
 
 
 if __name__ == "__main__":

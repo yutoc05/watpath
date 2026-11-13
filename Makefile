@@ -38,7 +38,7 @@ device: project data ## Build, install and launch on the connected iPhone
 
 demo: project data ## Record the walkthrough in the Simulator and cut docs/media/demo.mp4
 	python3 tools/demo/record.py --simulator "$(SIMULATOR)"
-	python3 tools/demo/make_video.py --out docs/media/demo.mp4 --gif docs/media/demo.gif
+	python3 tools/demo/make_video.py --out docs/media/demo.mp4
 
 clean: ## Remove build outputs
 	rm -rf build/DerivedData build/CampusBundle
