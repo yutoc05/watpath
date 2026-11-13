@@ -15,11 +15,13 @@ import UIKit
 final class PathMapView: UIView {
     /// Doors appear below this camera distance, as in Street Map.
     static let doorsVisibleBelowDistance = 1_400.0
-    static let routeColor = UIColor.systemBlue
-    static let alternativeRouteColor = UIColor(red: 0.55, green: 0.65, blue: 0.8, alpha: 1)
+    /// The app's honey accent, from the asset catalog, so routes match the buttons.
+    static let routeColor = UIColor(named: "AccentColor") ?? .systemOrange
+    /// Sand: routes not picked, and the stretch already walked.
+    static let alternativeRouteColor = UIColor(red: 0.80, green: 0.68, blue: 0.48, alpha: 1)
     /// Routes are the widest thing on either map, in points.
     static let routeWidth = 5.0
-    /// The white edge around the picked route, which sets it apart from a blue bridge.
+    /// The white edge around the picked route, which keeps it clear of the lines beneath.
     private static let routeEdgeWidth = 7.5
     /// The width of every line, in points, at any zoom or tilt.
     private static let lineWidth = 1.5

@@ -10,11 +10,19 @@ struct DirectionsSheet: View {
     static let routesPeek = PresentationDetent.height(routesPeekHeight)
 
     let model: AppModel
+    /// The list last shown, which stays while the sheet slides away for navigation.
+    @State private var shownRoutes: (routes: [Route], selected: Route.ID)?
 
     var body: some View {
         switch model.directions.step {
         case .routes(let routes, let selected):
             RouteList(model: model, routes: routes, selected: selected)
+                .onAppear { shownRoutes = (routes, selected) }
+                .onChange(of: selected) { shownRoutes = (routes, selected) }
+        case .navigating, .arrived:
+            if let shownRoutes {
+                RouteList(model: model, routes: shownRoutes.routes, selected: shownRoutes.selected)
+            }
         case .noRoutes:
             NoRoutes(model: model)
         case .findingRoutes:
