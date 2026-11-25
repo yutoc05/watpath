@@ -2,7 +2,7 @@
 // Renders a page from tools/demo to PNGs with headless Chrome, talking to it over the
 // DevTools protocol so fonts load once and each frame is taken at an exact time.
 //
-//   node render.mjs <url> <out.png> [--size 1920x1080] [--transparent]
+//   node render.mjs <url> <out.png> [--size 1920x1080] [--scale 2] [--transparent]
 //   node render.mjs <url> <dir> --frames 60      one PNG per frame of the page's animation
 //
 // A page that animates sets window.duration and window.seek(seconds); one that loads
@@ -16,7 +16,7 @@ const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/M
 
 const [url, out, ...rest] = process.argv.slice(2);
 if (!url || !out) {
-  console.error('usage: render.mjs <url> <out> [--size WxH] [--transparent] [--frames fps]');
+  console.error('usage: render.mjs <url> <out> [--size WxH] [--scale n] [--transparent] [--frames fps]');
   process.exit(2);
 }
 const option = name => {
@@ -24,6 +24,7 @@ const option = name => {
   return index === -1 ? undefined : rest[index + 1];
 };
 const [width, height] = (option('--size') ?? '1920x1080').split('x').map(Number);
+const scale = Number(option('--scale') ?? 1);
 const transparent = rest.includes('--transparent');
 const fps = option('--frames') ? Number(option('--frames')) : undefined;
 
@@ -73,7 +74,7 @@ try {
   const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
   const page = (method, params) => send(method, params, sessionId);
   await page('Page.enable');
-  await page('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await page('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scale, mobile: false });
   if (transparent) {
     await page('Emulation.setDefaultBackgroundColorOverride', { color: { r: 0, g: 0, b: 0, a: 0 } });
   }

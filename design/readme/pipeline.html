@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath: how it's built</title>
+<!-- From map data to the app, in four stages. Counts come from build/readme/data.js. -->
+<link rel="stylesheet" href="common.css">
+<style>
+body { --w: 860px; --h: 540px; }
+.backdrop { --gx: 50%; --gy: 62%; --glx: 50%; --gly: 70%; }
+header { position: absolute; left: 48px; right: 48px; top: 44px; display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; }
+header h2 { margin-top: 14px; }
+header p.lede { width: 320px; margin-bottom: 2px; }
+.flow { position: absolute; left: 48px; right: 48px; top: 170px; bottom: 46px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 26px; }
+.stage { position: relative; padding: 18px 16px 16px; display: flex; flex-direction: column; }
+.stage + .stage::before {
+  content: ""; position: absolute; left: -27px; top: 50%; width: 26px; height: 1px;
+  background: linear-gradient(90deg, rgb(243 179 61 / .2), var(--honey));
+}
+.stage + .stage::after {
+  content: ""; position: absolute; left: -6px; top: calc(50% - 3px); width: 0; height: 0;
+  border-left: 5px solid var(--honey); border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+}
+.stage .tag { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--honey); }
+.stage h3 { margin: 12px 0 0; font-size: 17px; font-weight: 600; letter-spacing: -.025em; color: var(--cream); }
+.stage .what { margin-top: 4px; font: 500 10.5px/1.4 var(--mono); color: var(--faint); }
+.stage ul { list-style: none; margin: 16px 0 0; padding: 14px 0 0; border-top: 1px solid var(--hair); display: grid; gap: 10px; }
+.stage li { position: relative; padding-left: 13px; font-size: 12px; line-height: 1.42; color: var(--muted); text-wrap: pretty; }
+.stage li::before { content: ""; position: absolute; left: 0; top: 7px; width: 5px; height: 5px; border-radius: 1.5px; background: var(--hair-2); }
+.stage li b { color: var(--text); font-weight: 500; }
+.stage .num { color: var(--text); }
+.stage.app { border-color: rgb(243 179 61 / .4); box-shadow: inset 0 1px 0 rgb(255 255 255 / .05), 0 24px 60px -26px rgb(243 179 61 / .4); }
+.modules { margin-top: auto; padding-top: 14px; display: flex; flex-wrap: wrap; gap: 5px; }
+.modules span { height: 20px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 6px; border: 1px solid var(--hair-2); font: 500 9.5px/1 var(--mono); color: var(--muted); background: rgb(255 246 227 / .03); }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<header>
+  <div>
+    <div class="eyebrow">How it's built</div>
+    <h2>From map data to a map in your pocket.</h2>
+  </div>
+  <p class="lede">A Python compiler checks the campus and turns it into one bundle and one walking graph. The app ships them, so it works with no network.</p>
+</header>
+<div class="flow" id="flow"></div>
+<script src="../../build/readme/data.js"></script>
+<script src="common.js"></script>
+<script>
+const s = WP.data.stats;
+const n = v => `<span class="num">${v.toLocaleString('en-US')}</span>`;
+const stages = [
+  { tag: 'Sources', title: 'Map data', what: 'data/', items: [
+      '<b>OpenStreetMap</b> outlines, doors and footpaths',
+      '<b>Hand-drawn lines</b> for corridors, bridges and tunnels',
+      `<b>An inventory</b> of ${n(s.buildings)} buildings and their floors`,
+    ] },
+  { tag: 'Compile · Python', title: 'Map compiler', what: 'tools/compiler', items: [
+      'Rejects a corridor that leaves its building',
+      'Joins indoor lines to footpaths at the doors',
+      'Tested with pytest'
+    ] },
+  { tag: 'Bundle · JSON', title: 'CampusBundle', what: 'build/CampusBundle', items: [
+      `<b>campus.json</b>: ${n(s.buildings)} buildings, ${n(s.doors)} doors, ${n(s.bridges + s.tunnels)} bridges and tunnels`,
+      `<b>graph.json</b>: ${n(s.nodes)} nodes and ${n(s.edges)} edges`,
+      'Shipped inside the app',
+    ] },
+  { tag: 'Swift 6', title: 'WatPathKit and the app', what: 'Packages/ · App/', app: true, items: [
+      'SwiftUI, a MapKit Street Map and a Core Animation Path Map',
+      'Its logic is a package tested on Linux too',
+    ], modules: ['CampusGeo', 'CampusModel', 'CampusSearch', 'Routing'] },
+];
+document.getElementById('flow').innerHTML = stages.map(st => `
+  <div class="card stage${st.app ? ' app' : ''}">
+    <div class="tag">${st.tag}</div>
+    <h3>${st.title}</h3>
+    <div class="what">${st.what}</div>
+    <ul>${st.items.map(i => `<li>${i}</li>`).join('')}</ul>
+    ${st.modules ? `<div class="modules">${st.modules.map(m => `<span>${m}</span>`).join('')}</div>` : ''}
+  </div>`).join('');
+window.ready = WP.ready();
+</script>
+</body>
+</html>

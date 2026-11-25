@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath: navigation</title>
+<!-- Navigation, annotated: an indoor and an outdoor moment of the same walk from SLC to E5
+     (build/readme/shots), with numbered markers keyed to the list on the left. -->
+<link rel="stylesheet" href="common.css">
+<style>
+body { --w: 860px; --h: 560px; }
+.backdrop { --gx: 72%; --gy: 50%; --glx: 70%; --gly: 55%; }
+.copy { position: absolute; left: 48px; top: 0; bottom: 0; width: 300px; display: flex; flex-direction: column; justify-content: center; }
+.copy h2 { margin: 16px 0 14px; }
+.keys { list-style: none; margin: 26px 0 0; padding: 0; display: grid; gap: 14px; }
+.keys li { display: grid; grid-template-columns: 26px 1fr; align-items: start; }
+.keys b { display: block; font-size: 14px; font-weight: 600; letter-spacing: -.015em; color: var(--cream); line-height: 20px; }
+.keys span { display: block; font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+.dot {
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--honey); color: #1A1306; font: 600 10.5px/1 var(--mono);
+  box-shadow: 0 0 0 3px rgb(243 179 61 / .22), 0 4px 10px rgb(0 0 0 / .5);
+}
+.phone { top: 40px; width: 228px; height: 480px; --radius: 38px; --bezel: 7px; }
+.phone .screen img { object-fit: cover; }
+.marker { position: absolute; z-index: 5; }
+.caption { position: absolute; z-index: 5; top: 528px; font: 500 10px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--faint); width: 228px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<div class="copy">
+  <div class="eyebrow">Navigation</div>
+  <h2>A walk you scrub with a finger.</h2>
+  <p class="lede">Indoors, GPS can’t tell which floor you’re on. So you drag along the route, and the camera turns through every corner.</p>
+  <ol class="keys">
+    <li><i class="dot">1</i><div><b>Goose to flag</b><span>How far along you are, at a glance.</span></div></li>
+    <li><i class="dot">2</i><div><b>The route, dotted in honey</b><span>Blue and red where it takes a bridge or a tunnel.</span></div></li>
+    <li><i class="dot">3</i><div><b>Arrival time, live</b><span>Minutes and meters left, as you scrub.</span></div></li>
+    <li><i class="dot">4</i><div><b>Outside, the street</b><span>The Street Map fades in for any stretch over 12 m.</span></div></li>
+  </ol>
+</div>
+<div class="phone" style="left: 378px"><div class="screen"><img src="../../build/readme/shots/nav-indoor.png" alt=""></div></div>
+<div class="phone" style="left: 618px"><div class="screen"><img src="../../build/readme/shots/nav-outdoor.png" alt=""></div></div>
+<div class="caption" style="left: 378px">Indoors · Path Map</div>
+<div class="caption" style="left: 618px">Outdoors · Street Map</div>
+<i class="dot marker" style="left: 470px; top: 64px">1</i>
+<i class="dot marker" style="left: 500px; top: 228px">2</i>
+<i class="dot marker" style="left: 510px; top: 456px">3</i>
+<i class="dot marker" style="left: 774px; top: 196px">4</i>
+<script src="common.js"></script>
+<script>window.ready = WP.ready();</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath: the campus network</title>
+<!-- The whole Path Map, drawn from build/CampusBundle with the counts beside it. -->
+<link rel="stylesheet" href="common.css">
+<style>
+body { --w: 860px; --h: 540px; }
+.backdrop { --gx: 68%; --gy: 50%; --glx: 66%; --gly: 48%; }
+.copy { position: absolute; left: 48px; top: 54px; width: 270px; }
+.copy h2 { margin: 16px 0 14px; }
+.stats { position: absolute; left: 48px; bottom: 50px; width: 270px; display: grid; grid-template-columns: 1fr 1fr; gap: 22px 18px; }
+.stat .value { font-weight: 600; font-size: 30px; line-height: 1; letter-spacing: -.04em; color: var(--cream); }
+.stat .value small { font-size: 17px; letter-spacing: -.02em; margin-left: 2px; color: var(--muted); font-weight: 500; }
+.stat .label { margin-top: 9px; display: flex; align-items: center; gap: 8px; font: 500 10.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.divider { position: absolute; left: 48px; width: 270px; bottom: 192px; height: 1px; background: var(--hair-2); }
+svg { position: absolute; inset: 0; }
+.code { font: 600 7.6px/1 var(--mono); letter-spacing: .06em; fill: #B7AE9F; paint-order: stroke; stroke: var(--ink); stroke-width: 2.6px; stroke-linejoin: round; }
+.callout text { font: 500 9.5px/1 var(--mono); letter-spacing: .04em; fill: var(--muted); }
+.callout .title { fill: var(--cream); font-family: var(--sans); font-weight: 600; font-size: 11px; letter-spacing: -.01em; }
+.scale text { font: 500 9px/1 var(--mono); letter-spacing: .06em; fill: var(--faint); }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<svg id="map" width="860" height="540"></svg>
+<div class="copy">
+  <div class="eyebrow">The network</div>
+  <h2>38 buildings,<br>one indoor map.</h2>
+  <p class="lede">The corridors, bridges and tunnels that join them, each drawn only where its route is mapped. No line is a guess.</p>
+</div>
+<div class="divider"></div>
+<div class="stats" id="stats"></div>
+<script src="../../build/readme/data.js"></script>
+<script src="common.js"></script>
+<script>
+const { data, el, fit, allPoints, drawCampus, defs } = WP;
+const svg = document.getElementById('map');
+defs(svg);
+// The map sits right of the copy; a little rotation-free padding keeps labels inside.
+const f = fit(allPoints(), { x: 318, y: 8, width: 530, height: 524 }, 4);
+drawCampus(svg, f, { corridor: 1, link: 1.9, doors: 0.9 });
+
+const labels = el('g', {}, svg);
+// Nudges, in pixels, for labels that would touch at this size.
+const NUDGE = { EV2: [-6, 9], EV3: [-4, -4], EXP: [-4, 0], LHI: [-2, 2], STC: [4, 3], B2: [-3, -2] };
+for (const b of data.buildings) {
+  const [x0, y0] = f(b.label);
+  const [x, y] = [x0 + (NUDGE[b.code]?.[0] ?? 0), y0 + (NUDGE[b.code]?.[1] ?? 0)];
+  el('text', { x, y: y + 2.6, class: 'code', 'text-anchor': 'middle' }, labels).textContent = b.code;
+}
+
+// Scale bar and north, bottom right.
+const scale = el('g', { class: 'scale' }, svg);
+const metres = 200, px = metres * f.scale, sx = 812 - px, sy = 512;
+el('path', { d: `M${sx} ${sy - 4}V${sy}H${sx + px}V${sy - 4}`, fill: 'none', stroke: 'var(--faint)', 'stroke-width': 1 }, scale);
+el('text', { x: sx + px / 2, y: sy - 8, 'text-anchor': 'middle' }, scale).textContent = '200 m';
+el('text', { x: 832, y: sy, 'text-anchor': 'middle' }, scale).textContent = 'N';
+el('path', { d: `M832 ${sy - 22}l-4 9h8z`, fill: 'var(--faint)' }, scale);
+
+const s = data.stats;
+const stats = [
+  [s.bridges, '', 'Bridges', 'var(--bridge)'],
+  [s.tunnels, '', 'Tunnels', 'var(--tunnel)'],
+  [(s.corridorMeters / 1000).toFixed(1), 'km', 'Corridors', '#fff'],
+  [s.doors, '', 'Doors', 'var(--honey)'],
+];
+document.getElementById('stats').innerHTML = stats.map(([value, unit, label, color]) =>
+  `<div class="stat"><div class="value num">${value}${unit ? `<small>${unit}</small>` : ''}</div>` +
+  `<div class="label"><span class="swatch" style="background:${color}"></span>${label}</div></div>`).join('');
+window.ready = WP.ready();
+</script>
+</body>
+</html>

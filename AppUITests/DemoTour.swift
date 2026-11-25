@@ -1,13 +1,15 @@
 import CoreLocation
 import XCTest
 
-/// The walkthrough in the demo video, played by `tools/demo/record.py` while the Simulator
-/// records. It isn't a check of anything: it runs only when DEMO_DIR is set (pass
-/// TEST_RUNNER_DEMO_DIR to xcodebuild), and it pauses so people can follow along. It writes
-/// when each scene starts to DEMO_DIR/scenes.json, which the video cuts on.
+/// The walkthroughs in the demo video and the README's feature clips, played by
+/// `tools/demo/record.py` while the Simulator records. They aren't checks of anything: they
+/// run only when DEMO_DIR is set (pass TEST_RUNNER_DEMO_DIR to xcodebuild), and they pause so
+/// people can follow along. Each writes when its scenes start to DEMO_DIR, in scenes.json for
+/// the tour and features.json for the clips, which the video and the clips are cut on.
 final class DemoTour: XCTestCase {
     private var app: XCUIApplication!
     private var directory: URL!
+    private var scenesFile = "scenes.json"
     private var scenes: [[String: Any]] = []
 
     override func setUpWithError() throws {
@@ -104,7 +106,115 @@ final class DemoTour: XCTestCase {
         mark("end")
     }
 
+    /// The README's feature clips, one after another: the x-ray switch in 3D, a search with a
+    /// typo, the four routes from SLC to E5, and walking one with an outdoor stretch.
+    @MainActor
+    func testFeatures() throws {
+        scenesFile = "features.json"
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 43.6426, longitude: -79.3871))
+        app = XCUIApplication()
+        app.launchArguments = ["-resetRecents", "-showTouches"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Search"].waitForExistence(timeout: 10))
+        pause(2)
+
+        // Frame the middle of campus in 3D: open a building, close its card, step back, tilt.
+        app.buttons["Search"].tap()
+        type("c2")
+        choose("Chemistry 2")
+        XCTAssertTrue(app.staticTexts["placeTitle"].waitForExistence(timeout: 5))
+        pause(1)
+        app.buttons["Close"].tap()
+        pause(1)
+        app.pinch(withScale: Double(ProcessInfo.processInfo.environment["DEMO_XRAY_PINCH"] ?? "0.7") ?? 0.7, velocity: -0.5)
+        pause(1)
+        app.buttons["3D"].tap()
+        pause(3)
+
+        mark("xray")
+        pause(1.2)
+        mode("Path")
+        pause(2.2)
+        mode("Street")
+        pause(1.8)
+        mode("Path")
+        pause(1)
+        app.rotate(0.5, withVelocity: 0.4)
+        pause(1.5)
+        mode("Street")
+        pause(2)
+        mark("xrayEnd")
+        app.buttons["2D"].tap()
+        pause(1.5)
+
+        mark("search")
+        app.buttons["Search"].tap()
+        pause(1.5)
+        type("engineerign 5")
+        pause(1.2)
+        choose("Engineering 5")
+        XCTAssertTrue(app.staticTexts["placeTitle"].waitForExistence(timeout: 5))
+        pause(3)
+        mark("searchEnd")
+
+        mark("routes")
+        tap("directionsButton")
+        pause(1.5)
+        tap("outsideButton")
+        pause(0.8)
+        type("slc")
+        pause(0.8)
+        choose("Student Life Centre")
+        XCTAssertTrue(app.buttons["route-3"].waitForExistence(timeout: 5))
+        pause(2.5)
+        for index in [1, 2, 3, 1] {
+            app.buttons["route-\(index)"].tap()
+            pause(2)
+        }
+        mark("routesEnd")
+
+        // Balanced: a bridge, a tunnel and another bridge, then 143 m outside to E5.
+        mark("navigate")
+        tap("start-1")
+        let progress = app.descendants(matching: .any)["navigationProgress"]
+        XCTAssertTrue(progress.waitForExistence(timeout: 5))
+        pause(2)
+        walk(from: 0.3, to: 0.62)
+        pause(0.6)
+        slowDrag(from: CGVector(dx: 0.82, dy: 0.42), to: CGVector(dx: 0.3, dy: 0.42))
+        pause(2)
+        for _ in 0..<20 where percent(progress) < 64 {
+            flick()
+            pause(1.5)
+        }
+        mark("outdoors")
+        let arrived = app.staticTexts["You've arrived"]
+        for _ in 0..<30 {
+            if arrived.waitForExistence(timeout: 0.5) { break }
+            walk(from: 0.25, to: 0.6)
+            pause(0.8)
+        }
+        XCTAssertTrue(arrived.exists)
+        mark("arrived")
+        pause(2.5)
+        app.buttons["endNavigation"].tap()
+        mark("navigateEnd")
+        pause(1.5)
+        mark("end")
+    }
+
     // MARK: - Steps
+
+    @MainActor
+    private func mode(_ name: String) {
+        app.segmentedControls["mapModePicker"].buttons[name].tap()
+    }
+
+    /// How far along the route navigation is, from its progress bar.
+    @MainActor
+    private func percent(_ progress: XCUIElement) -> Int {
+        Int((progress.value as? String ?? "").dropLast()) ?? 0
+    }
 
     /// Where to drag the map so the pin, which starts on DC, lands inside MC. Set
     /// DEMO_PIN_DRAG to "fromX,fromY,toX,toY" in shares of the screen to try another.
@@ -170,6 +280,6 @@ final class DemoTour: XCTestCase {
         scenes.append(scene)
         let data = try? JSONSerialization.data(withJSONObject: scenes, options: [.prettyPrinted])
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data?.write(to: directory.appendingPathComponent("scenes.json"))
+        try? data?.write(to: directory.appendingPathComponent(scenesFile))
     }
 }

@@ -4,9 +4,11 @@
 Builds the app and its UI tests, tidies the Simulator (full battery, light mode,
 location allowed), then plays AppUITests/DemoTour.swift while `simctl` records the screen.
 Leaves build/demo/raw.mov, plus scenes.json (when each scene started) and recording.json
-(when the recording started), which make_video.py turns into the finished video.
+(when the recording started), which make_video.py turns into the finished video. With
+--test testFeatures it plays the README's feature clips instead, into raw-features.mov,
+features.json and recording-features.json, which make_readme_media.py cuts.
 
-    tools/demo/record.py [--simulator "iPhone 17"]
+    tools/demo/record.py [--simulator "iPhone 17"] [--test testTour|testFeatures]
 """
 import argparse
 import json
@@ -58,6 +60,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--simulator", default="iPhone 17")
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--test", default="testTour", choices=["testTour", "testFeatures"])
     args = parser.parse_args()
     os.environ.setdefault("DEVELOPER_DIR", DEVELOPER_DIR)
     udid = simulator_id(args.simulator)
@@ -70,8 +73,10 @@ def main():
 
     prepare(udid)
     OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "scenes.json").unlink(missing_ok=True)
-    raw = OUT / "raw.mov"
+    suffix = "" if args.test == "testTour" else "-features"
+    scenes = OUT / ("scenes.json" if args.test == "testTour" else "features.json")
+    scenes.unlink(missing_ok=True)
+    raw = OUT / f"raw{suffix}.mov"
     recorder = subprocess.Popen(
         ["xcrun", "simctl", "io", udid, "recordVideo", "--codec=h264", "--force", str(raw)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -83,12 +88,12 @@ def main():
     try:
         env = dict(os.environ, TEST_RUNNER_DEMO_DIR=str(OUT))
         result = subprocess.run(
-            [*xcodebuild, "test-without-building", "-only-testing:WatPathUITests/DemoTour/testTour", "-quiet"], env=env
+            [*xcodebuild, "test-without-building", f"-only-testing:WatPathUITests/DemoTour/{args.test}", "-quiet"], env=env
         )
     finally:
         recorder.send_signal(signal.SIGINT)
         recorder.wait()
-    (OUT / "recording.json").write_text(json.dumps({"started": started, "simulator": args.simulator}, indent=2))
+    (OUT / f"recording{suffix}.json").write_text(json.dumps({"started": started, "simulator": args.simulator}, indent=2))
     if result.returncode != 0:
         sys.exit("The tour failed; see the xcodebuild output above.")
     print(f"Recorded {raw}")

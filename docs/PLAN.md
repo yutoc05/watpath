@@ -1,6 +1,6 @@
 # WatPath: Project Plan
 
-*Status: Street Map, Path Map, routing and scrub navigation work, and the app has its icon, colors and demo video. The rest of polish is next, and the door survey is still to do · Last updated 2026-11-13*
+*Status: Street Map, Path Map, routing and scrub navigation work, and the app has its icon, colors, demo video and a README with feature clips and designed images. The rest of polish is next, and the door survey is still to do · Last updated 2026-11-24*
 
 WatPath is an iPhone app for getting around the University of Waterloo main campus while staying indoors. It's closely modeled on *Toronto PATH Navigation* (Area 43 Labs). It has two map modes that share one camera, so switching between them feels like x-ray vision:
 
@@ -107,7 +107,8 @@ The inventory lives in `data/campus/inventory.json`, so adding a building later 
 ### 3.7 Look and demo
 - [x] The app icon is the navigation goose on its path, on marigold. Its source is `design/app-icon.svg`. It was picked on 2026-11-13 from eight directions, with the wordmark in Quicksand.
 - [x] A honey accent (#B97300) on buttons, the picked route and the progress bar, with sand for routes not picked. The Path Map keeps its white, blue and red lines, and your location stays blue.
-- [x] A one-minute demo video in the README. A UI test (`AppUITests/DemoTour.swift`) plays the tour while the Simulator records, and `tools/demo` cuts it, trims the waits and adds the intro and captions (`make demo`). Debug builds draw a circle under each finger when launched with `-showTouches`, so the recording shows the gestures.
+- [x] A one-minute demo video in the README, shown as a GIF that links to the MP4. A UI test (`AppUITests/DemoTour.swift`) plays the tour while the Simulator records, and `tools/demo` cuts it, trims the waits and adds the intro and captions (`make demo`). Debug builds draw a circle under each finger when launched with `-showTouches`, so the recording shows the gestures.
+- [x] README clips and images (`make readme-media`), in `docs/media/readme`. A second tour (`DemoTour.testFeatures`) records the x-ray switch in 3D, a search with a typo, the four routes from SLC to E5 and a walk with an outdoor stretch. `tools/demo/make_readme_media.py` cuts one GIF per feature, each beside its steps on a stage, and renders the designed images from `design/readme`: the hero, the whole network, the route choices, an annotated navigation screen, the build pipeline and the measured numbers. The network and the routes are drawn from the compiled bundle and the real router (`RoutingTests/ReadmeRoutes`), so rerunning it keeps them true.
 
 ## 4. Architecture
 
@@ -260,10 +261,10 @@ watpath/
   data/                  # source data (ODbL); data/private/ gitignored
   tools/compiler/        # Python map compiler + tests
   tools/osm_import/      # OSM importer + tests
-  tools/demo/            # records the walkthrough and cuts the demo video
-  design/                # app icon source
-  docs/                  # this plan, decision records, generated coverage and survey, demo video
-  Makefile               # make project · data · test · uitest · sim · device · demo
+  tools/demo/            # records the tours; cuts the demo video and the README's clips and images
+  design/                # app icon source; readme/ holds the pages the README's images are drawn from
+  docs/                  # this plan, decision records, generated coverage and survey, media
+  Makefile               # make project · data · test · uitest · sim · device · demo · readme-media
 ```
 
 - **Tests:** Swift Testing for packages, XCUITest for the main flows, pytest for the tools.
@@ -292,4 +293,4 @@ watpath/
 | Campus changes (M4 in 2027, construction closures) | Certain | Data versioned in git; a `closed` flag on connections; recompile |
 | Publishing | Medium | The repo stays private; ask Plant Operations before making it public |
 | 7-day free signing expiry | Certain | Weekly re-sign; demo video as backup for interviews |
-| Looking like a copy of the original | Low | Own name, branding and icon; no UW logos; credit the inspiration in the README |
+| Looking like a copy of the original | Low | Own name, branding and icon; no UW logos |

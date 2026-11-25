@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath: four ways from SLC to E5</title>
+<!-- The route list from SLC to E5 as the router finds it (build/readme/data.js, from
+     RoutingTests/ReadmeRoutes), one card per route with its line on the campus. -->
+<link rel="stylesheet" href="common.css">
+<style>
+body { --w: 860px; --h: 560px; }
+.backdrop { --gx: 50%; --gy: 70%; --glx: 50%; --gly: 75%; }
+header { position: absolute; left: 48px; right: 48px; top: 46px; display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; }
+header h2 { margin-top: 14px; }
+header p.lede { width: 330px; margin-bottom: 2px; }
+.cards { position: absolute; left: 48px; right: 48px; bottom: 44px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.route { padding: 12px 12px 16px; display: flex; flex-direction: column; }
+.route.pick { border-color: rgb(243 179 61 / .45); box-shadow: inset 0 1px 0 rgb(255 255 255 / .05), 0 0 0 1px rgb(243 179 61 / .12), 0 24px 60px -24px rgb(243 179 61 / .35); }
+.route svg { display: block; width: 100%; height: 168px; border-radius: 10px; background: #0C0B0A; border: 1px solid var(--hair); }
+.route .label { margin: 14px 2px 0; font: 500 10.5px/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--honey); }
+.route .time { margin: 10px 2px 0; display: flex; align-items: baseline; justify-content: space-between; }
+.route .time b { font-weight: 600; font-size: 26px; letter-spacing: -.04em; color: var(--cream); }
+.route .time b small { font-size: 14px; font-weight: 500; color: var(--muted); margin-left: 3px; letter-spacing: -.01em; }
+.route .time span { font: 500 11px/1 var(--mono); color: var(--muted); }
+.bar { margin: 12px 2px 0; height: 6px; border-radius: 6px; background: #3B3631; overflow: hidden; display: flex; }
+.bar i { display: block; height: 100%; background: linear-gradient(90deg, #E0A132, var(--honey)); border-radius: 6px; }
+.split { margin: 9px 2px 0; display: flex; justify-content: space-between; font: 500 10.5px/1 var(--mono); color: var(--muted); }
+.split .in { color: var(--text); }
+.via { margin: 12px 2px 0; padding-top: 11px; border-top: 1px solid var(--hair); font: 500 10px/1.5 var(--mono); letter-spacing: .03em; color: var(--faint); }
+.key { position: absolute; right: 48px; top: 136px; display: flex; gap: 8px; }
+.key .chip { height: 22px; }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<header>
+  <div>
+    <div class="eyebrow">Directions</div>
+    <h2>Four ways from SLC to E5.</h2>
+  </div>
+  <p class="lede">Each route is the best for some balance of speed and time outside, so none is beaten on both. Four extra minutes buys a walk with no outdoors at all.</p>
+</header>
+<div class="cards" id="cards"></div>
+<script src="../../build/readme/data.js"></script>
+<script src="common.js"></script>
+<script>
+const { data, el, fit, d } = WP;
+const routes = data.routes;
+const round10 = m => Math.round(m / 10) * 10;
+// One frame for every card: the routes' bounds, with some campus around them.
+const points = routes.flatMap(r => r.spans.flatMap(s => s.points));
+const cards = document.getElementById('cards');
+for (const [i, route] of routes.entries()) {
+  const inside = Math.round(100 * route.inside / route.distance);
+  const card = document.createElement('div');
+  card.className = 'card route' + (route.label === 'Most indoor' ? ' pick' : '');
+  card.innerHTML = `
+    <svg viewBox="0 0 168 168" preserveAspectRatio="xMidYMid slice"></svg>
+    <div class="label">${route.label}</div>
+    <div class="time"><b class="num">${route.minutes}<small>min</small></b><span class="num">${round10(route.distance)} m</span></div>
+    <div class="bar"><i style="width:${inside}%"></i></div>
+    <div class="split num"><span class="in">${inside}% inside</span><span>${round10(route.outside)} m out</span></div>
+    <div class="via">${route.buildings.map((b, j) => j < route.buildings.length - 1 ? `${b}&nbsp;·` : b).join(' ')}</div>`;
+  cards.appendChild(card);
+  const svg = card.querySelector('svg');
+  WP.defs(svg);
+  const f = fit(points, { x: 0, y: 0, width: 168, height: 168 }, 22);
+  // The campus behind, quietly.
+  el('path', {
+    d: data.buildings.map(b => b.rings.map(r => d(r, f, true)).join('')).join(''),
+    fill: '#24211E', stroke: 'rgb(255 246 227 / .06)', 'stroke-width': .5,
+  }, svg);
+  // Inside in honey, outside as a dotted cream line, like the app's navigation route.
+  for (const span of route.spans) {
+    if (span.points.length < 2) continue;
+    const path = d(span.points, f);
+    if (span.kind === 'outdoor') {
+      el('path', { d: path, fill: 'none', stroke: '#FFF6E3', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-dasharray': '0.1 4.2', opacity: .9 }, svg);
+    } else {
+      el('path', { d: path, fill: 'none', stroke: '#F3B33D', 'stroke-width': 6, opacity: .2, filter: 'url(#soft)', 'stroke-linecap': 'round' }, svg);
+      el('path', { d: path, fill: 'none', stroke: '#F3B33D', 'stroke-width': 2.2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
+    }
+  }
+  const all = route.spans.flatMap(s => s.points);
+  const [sx, sy] = f(all[0]), [ex, ey] = f(all[all.length - 1]);
+  el('circle', { cx: sx, cy: sy, r: 3.6, fill: '#100F0D', stroke: '#FFF6E3', 'stroke-width': 1.6 }, svg);
+  el('circle', { cx: ex, cy: ey, r: 4, fill: '#F3B33D', stroke: '#100F0D', 'stroke-width': 1.4 }, svg);
+  const tag = (x, y, text, anchor) => {
+    const t = el('text', { x, y, 'text-anchor': anchor, style: 'font: 600 8px var(--mono); letter-spacing: .06em; fill: #CFC6B6; paint-order: stroke; stroke: #0C0B0A; stroke-width: 3px' }, svg);
+    t.textContent = text;
+  };
+  tag(sx, sy + 15, 'SLC', 'middle');
+  tag(ex, ey - 9, 'E5', 'middle');
+}
+window.ready = WP.ready();
+</script>
+</body>
+</html>

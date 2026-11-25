@@ -4,7 +4,7 @@ SIMULATOR ?= iPhone 17
 # The data tools need shapely; uv provides it (and pytest) without a virtualenv to manage.
 PYTHON := uv run --no-project --with-requirements tools/requirements.txt python
 
-.PHONY: help project osm data test test-python test-swift uitest sim device demo clean
+.PHONY: help project osm data test test-python test-swift uitest sim device demo readme-media clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -39,6 +39,10 @@ device: project data ## Build, install and launch on the connected iPhone
 demo: project data ## Record the walkthrough in the Simulator and cut docs/media/demo.mp4
 	python3 tools/demo/record.py --simulator "$(SIMULATOR)"
 	python3 tools/demo/make_video.py --out docs/media/demo.mp4 --gif docs/media/demo.gif
+
+readme-media: project data ## Record the feature clips and make the README's images in docs/media/readme
+	python3 tools/demo/record.py --simulator "$(SIMULATOR)" --test testFeatures
+	python3 tools/demo/make_readme_media.py
 
 clean: ## Remove build outputs
 	rm -rf build/DerivedData build/CampusBundle

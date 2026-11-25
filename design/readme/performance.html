@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WatPath: measured on an iPhone 12</title>
+<!-- Four numbers from the decision records, each measured on an iPhone 12. Keep them in
+     step with docs/adr/001 to 004. -->
+<link rel="stylesheet" href="common.css">
+<style>
+body { --w: 860px; --h: 310px; }
+.backdrop { --gx: 50%; --gy: 60%; --glx: 50%; --gly: 100%; }
+header { position: absolute; left: 48px; right: 48px; top: 40px; display: flex; justify-content: space-between; align-items: baseline; }
+header h2 { font-size: 24px; }
+header .eyebrow { color: var(--muted); }
+.tiles { position: absolute; left: 48px; right: 48px; top: 96px; bottom: 40px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.tile { padding: 18px 18px 16px; display: flex; flex-direction: column; }
+.tile .value { font-weight: 600; font-size: 34px; line-height: 1; letter-spacing: -.045em; color: var(--cream); white-space: nowrap; }
+.tile .value small { font-size: 16px; font-weight: 500; letter-spacing: -.01em; color: var(--honey); margin-left: 3px; }
+.tile .label { margin-top: 12px; font-size: 13px; line-height: 1.4; color: var(--text); font-weight: 500; letter-spacing: -.01em; }
+.tile .detail { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--hair); font: 500 9.5px/1.45 var(--mono); color: var(--faint); white-space: nowrap; }
+.meter { margin: 14px 0 0; height: 4px; border-radius: 4px; background: #34302B; position: relative; }
+.meter i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; background: var(--honey); }
+.meter b { position: absolute; top: -4px; width: 1px; height: 12px; background: var(--muted); }
+</style>
+</head>
+<body>
+<div class="backdrop"></div>
+<header>
+  <h2>Measured on an iPhone 12.</h2>
+  <div class="eyebrow">Numbers from the decision records</div>
+</header>
+<div class="tiles">
+  <div class="card tile">
+    <div class="value num">0.00003<small>pt</small></div>
+    <div class="label">Between the shared camera and MapKit’s, so the maps line up</div>
+    <div class="detail">RMS · ADR-001</div>
+  </div>
+  <div class="card tile">
+    <div class="value num">22<small>ms</small></div>
+    <div class="label">To find a route list, averaged over every pair of buildings</div>
+    <div class="detail">Worst 108 ms · ADR-003</div>
+  </div>
+  <div class="card tile">
+    <div class="value num">0<small>of 1,440</small></div>
+    <div class="label">Path Map frames late, under fast pans and tilts</div>
+    <div class="detail">Main thread · ADR-002</div>
+  </div>
+  <div class="card tile">
+    <div class="value num">2.5<small>ms/s</small></div>
+    <div class="label">Of hitches while navigating, half Apple’s limit</div>
+    <div class="meter"><i style="width: 25%"></i><b style="left: 50%"></b></div>
+    <div class="detail">Limit 5 ms/s · ADR-004</div>
+  </div>
+</div>
+<script src="common.js"></script>
+<script>window.ready = WP.ready();</script>
+</body>
+</html>
