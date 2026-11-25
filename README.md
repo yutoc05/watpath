@@ -7,12 +7,9 @@ indoors. It has two map modes that share one camera:
 
 Switching between them is like x-ray vision. The full plan is in [docs/PLAN.md](docs/PLAN.md).
 
-## Demo
+[![A one-minute tour of WatPath: search, the Street and Path maps, directions from a pin inside MC, and walking the route to DC](docs/media/demo.gif)](docs/media/demo.mp4)
 
-https://github.com/user-attachments/assets/cc8e9736-0298-4d1f-905a-2d964d2eb40f
-
-
-A one-minute tour, recorded in the Simulator: search, the Street and Path maps, directions from a pin inside MC, and walking the route to DC. The video is also in [docs/media/demo.mp4](docs/media/demo.mp4).
+A one-minute tour, recorded in the Simulator. Click it for the [full-quality video](docs/media/demo.mp4).
 
 **Status:** both maps and routing work:
 - Street Map: door markers, place cards, and search (typo-tolerant, with Recents and Popular).
